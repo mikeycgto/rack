@@ -591,6 +591,5 @@ module Rack
       path.valid_encoding? && !path.include?(NULL_BYTE)
     end
     module_function :valid_path?
-
   end
 end
