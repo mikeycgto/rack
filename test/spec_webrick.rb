@@ -120,6 +120,8 @@ describe Rack::Handler::WEBrick do
   end
 
   it "provide a .run" do
+    skip if RUBY_PLATFORM == 'java'
+
     block_ran = false
     latch = Concurrent::CountDownLatch.new 1
 
