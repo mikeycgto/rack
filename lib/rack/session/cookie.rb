@@ -1,5 +1,6 @@
 require 'openssl'
 require 'zlib'
+require 'rack/encryptor'
 require 'rack/request'
 require 'rack/response'
 require 'rack/session/abstract/id'
@@ -16,7 +17,12 @@ module Rack
     # Both methods must take a string and return a string.
     #
     # When the secret key is set, cookie data is checked for data integrity.
-    # The old secret key is also accepted and allows graceful secret rotation.
+    # The old_secret key is also accepted and allows graceful secret rotation.
+    # A legacy_hmac_secret is also accepted and is used to upgrade existing
+    # sessions to the new encryption scheme.
+    #
+    # There is also a legacy_hmac_coder option which can be set if a non-default
+    # coder was used for legacy session cookies.
     #
     # Example:
     #
@@ -25,9 +31,20 @@ module Rack
     #                                :path => '/',
     #                                :expire_after => 2592000,
     #                                :secret => 'change_me',
-    #                                :old_secret => 'also_change_me'
+    #                                :old_secret => 'old_secret'
     #
     #     All parameters are optional.
+    #
+    # Example using legacy HMAC options
+    #
+    #   Rack::Session:Cookie.new(application, {
+    #     # The secret used for legacy HMAC cookies
+    #     legacy_hmac_secret: 'legacy secret',
+    #     # legacy_hmac_coder will default to Rack::Session::Cookie::Base64::Marshal
+    #     legacy_hmac_coder: Rack::Session::Cookie::Identity.new,
+    #     # legacy_hmac will default to OpenSSL::Digest::SHA1
+    #     legacy_hmac: OpenSSL::Digest::SHA256
+    #   })
     #
     # Example of a cookie with no encoding:
     #
@@ -101,16 +118,24 @@ module Rack
         def decode(str); str; end
       end
 
+      class Marshal
+        def encode(str)
+          ::Marshal.dump(str)
+        end
+
+        def decode(str)
+          ::Marshal.load(str) if str
+        end
+      end
+
       attr_reader :coder
 
       def initialize(app, options={})
-        @secrets = options.values_at(:secret, :old_secret).compact
-        @hmac = options.fetch(:hmac, OpenSSL::Digest::SHA1)
-
-        # Multiply the :digest_length: by 2 because this value is the length of
-        # the digest in bytes but session digest strings are encoded as hex
-        # strings
-        @hmac_length = @hmac.new.digest_length * 2
+        # Assume keys are hex strings and convert them to raw byte strings for
+        # actual key material
+        @secrets = options.values_at(:secret, :old_secret).compact.map { |secret|
+          [secret].pack('H*')
+        }
 
         warn <<-MSG unless secure?(options)
         SECURITY WARNING: No secret option provided to Rack::Session::Cookie.
@@ -121,7 +146,36 @@ module Rack
 
         Called from: #{caller[0]}.
         MSG
-        @coder  = options[:coder] ||= Base64::Marshal.new
+
+        warn <<-MSG if @secrets.first && @secrets.first.length < 32
+        SECURITY WARNING: Your secret is not long enough. It must be at least
+        32 bytes long and securely random. To generate such a key for use
+        you can run the following command:
+
+        ruby -rsecurerandom -e 'p SecureRandom.hex(32)'
+
+        Called from: #{caller[0]}.
+        MSG
+
+        if options.has_key?(:legacy_hmac_secret)
+          @legacy_hmac = options.fetch(:legacy_hmac, OpenSSL::Digest::SHA1)
+
+          # Multiply the :digest_length: by 2 because this value is the length of
+          # the digest in bytes but session digest strings are encoded as hex
+          # strings
+          @legacy_hmac_length = @legacy_hmac.new.digest_length * 2
+          @legacy_hmac_secret = options[:legacy_hmac_secret]
+          @legacy_hmac_coder  = (options[:legacy_hmac_coder] ||= Base64::Marshal.new)
+        else
+          @legacy_hmac = false
+        end
+
+        # If encryption is used we can just use a default Marshal encoder
+        # without Base64 encoding the results.
+        #
+        # If no encryption is used, rely on the previous default (Base64::Marshal)
+        @coder = (options[:coder] ||= (@secrets.any? ? Marshal.new : Base64::Marshal.new))
+
         super(app, options.merge!(:cookie_only => true))
       end
 
@@ -139,15 +193,27 @@ module Rack
 
       def unpacked_cookie_data(request)
         request.fetch_header(RACK_SESSION_UNPACKED_COOKIE_DATA) do |k|
-          session_data = request.cookies[@key]
+          session_data = cookie_data = request.cookies[@key]
 
-          if @secrets.size > 0 && session_data
-            digest = session_data.slice!(-@hmac_length..-1)
-            session_data.slice!(-2..-1) # remove double dash
-            session_data = nil unless digest_match?(session_data, digest)
+          # Try to decrypt with the first secret, if that returns nil, try
+          # with old_secret
+          unless @secrets.empty?
+            session_data = Rack::Encryptor.decrypt_message(cookie_data, @secrets.first)
+            session_data ||= Rack::Encryptor.decrypt_message(cookie_data, @secrets[1]) if @secrets.size > 1
           end
 
-          request.set_header(k, coder.decode(session_data) || {})
+          # If session_data is still nil, are there is a legacy HMAC
+          # configured, try verify and parse the cookie that way
+          if !session_data && @legacy_hmac
+            digest = cookie_data.slice!(-@legacy_hmac_length..-1)
+            cookie_data.slice!(-2..-1) # remove double dash
+            session_data = cookie_data if digest_match?(cookie_data, digest)
+
+            # Decode using legacy HMAC decoder
+            request.set_header(k, @legacy_hmac_coder.decode(session_data) || {})
+          else
+            request.set_header(k, coder.decode(session_data) || {})
+          end
         end
       end
 
@@ -161,8 +227,8 @@ module Rack
         session = session.merge("session_id" => session_id)
         session_data = coder.encode(session)
 
-        if @secrets.first
-          session_data << "--#{generate_hmac(session_data, @secrets.first)}"
+        unless @secrets.empty?
+          session_data = Rack::Encryptor.encrypt_message(session_data, @secrets.first)
         end
 
         if session_data.size > (4096 - @key.size)
@@ -179,21 +245,19 @@ module Rack
       end
 
       def digest_match?(data, digest)
-        return unless data && digest
-        @secrets.any? do |secret|
-          Rack::Utils.secure_compare(digest, generate_hmac(data, secret))
-        end
+        return false unless data && digest
+
+        Rack::Utils.secure_compare(digest, generate_hmac(data))
       end
 
-      def generate_hmac(data, secret)
-        OpenSSL::HMAC.hexdigest(@hmac.new, secret, data)
+      def generate_hmac(data)
+        OpenSSL::HMAC.hexdigest(@legacy_hmac.new, @legacy_hmac_secret, data)
       end
 
       def secure?(options)
         @secrets.size >= 1 ||
         (options[:coder] && options[:let_coder_handle_secure_encoding])
       end
-
     end
   end
 end
