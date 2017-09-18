@@ -165,7 +165,7 @@ describe Rack::Session::Cookie do
     @warnings.must_be :empty?
   end
 
-  it 'warns if secret is to short' do
+  it 'warns if secret is too short' do
     Rack::Session::Cookie.new(incrementor, :secret => @secret[0,16])
     @warnings.first.must_match(/secret is not long enough/i)
     @warnings.clear
@@ -365,7 +365,7 @@ describe Rack::Session::Cookie do
     legacy_session = Rack::Session::Cookie::Base64::Marshal.new.encode({ 'counter' => 1, 'session_id' => 'abcdef' })
     legacy_secret  = 'test legacy secret'
     legacy_digest  = OpenSSL::HMAC.hexdigest(legacy_hmac.new, legacy_secret, legacy_session)
-    legacy_cookie = "rack.session=#{Rack::Utils.escape legacy_session}--#{legacy_digest}; path=/; HttpOnly"
+    legacy_cookie = "rack.session=#{legacy_session}--#{legacy_digest}; path=/; HttpOnly"
 
     app = [incrementor, {
       :secret => @secret, legacy_hmac_secret: legacy_secret, legacy_hmac: legacy_hmac }]

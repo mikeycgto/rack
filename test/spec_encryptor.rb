@@ -27,7 +27,7 @@ describe Rack::Encryptor do
   it 'encryptor and decryptor handles overly long keys' do
     new_secret = "#{@secret}abcdef123456"
 
-    # These methos should truncate the long key (so OpenSSL raise exceptions)
+    # These methods should truncate the long key (so OpenSSL raises an exception)
     cmsg = Rack::Encryptor.encrypt_message('hello world', new_secret)
     pmsg = Rack::Encryptor.decrypt_message(cmsg, new_secret)
 
