@@ -1,8 +1,8 @@
-require 'minitest/autorun'
-require 'rack/mock'
-require 'concurrent/utility/native_integer'
-require 'concurrent/atomic/count_down_latch'
-require File.expand_path('../testrequest', __FILE__)
+# frozen_string_literal: true
+
+require_relative 'helper'
+require 'thread'
+require_relative 'testrequest'
 
 Thread.abort_on_exception = true
 
@@ -10,10 +10,10 @@ describe Rack::Handler::WEBrick do
   include TestRequest::Helpers
 
   before do
-  @server = WEBrick::HTTPServer.new(:Host => @host='127.0.0.1',
-                                    :Port => @port=9202,
-                                    :Logger => WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
-                                    :AccessLog => [])
+  @server = WEBrick::HTTPServer.new(Host: @host = '127.0.0.1',
+                                    Port: @port = 9202,
+                                    Logger: WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
+                                    AccessLog: [])
   @server.mount "/test", Rack::Handler::WEBrick,
     Rack::Lint.new(TestRequest.new)
   @thread = Thread.new { @server.start }
@@ -50,7 +50,7 @@ describe Rack::Handler::WEBrick do
 
   it "have rack headers" do
     GET("/test")
-    response["rack.version"].must_equal [1,3]
+    response["rack.version"].must_equal [1, 3]
     response["rack.multithread"].must_equal true
     assert_equal false, response["rack.multiprocess"]
     assert_equal false, response["rack.run_once"]
@@ -81,7 +81,7 @@ describe Rack::Handler::WEBrick do
   end
 
   it "have CGI headers on POST" do
-    POST("/test", {"rack-form-data" => "23"}, {'X-test-header' => '42'})
+    POST("/test", { "rack-form-data" => "23" }, { 'X-test-header' => '42' })
     status.must_equal 200
     response["REQUEST_METHOD"].must_equal "POST"
     response["SCRIPT_NAME"].must_equal "/test"
@@ -93,7 +93,7 @@ describe Rack::Handler::WEBrick do
   end
 
   it "support HTTP auth" do
-    GET("/test", {:user => "ruth", :passwd => "secret"})
+    GET("/test", { user: "ruth", passwd: "secret" })
     response["HTTP_AUTHORIZATION"].must_equal "Basic cnV0aDpzZWNyZXQ="
   end
 
@@ -120,27 +120,32 @@ describe Rack::Handler::WEBrick do
   end
 
   it "provide a .run" do
-    skip if RUBY_PLATFORM == 'java'
-
-    block_ran = false
-    latch = Concurrent::CountDownLatch.new 1
+    queue = Queue.new
 
     t = Thread.new do
       Rack::Handler::WEBrick.run(lambda {},
-                                 {
-                                   :Host => '127.0.0.1',
-                                   :Port => 9210,
-                                   :Logger => WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
-                                   :AccessLog => []}) { |server|
-        block_ran = true
+                                   Host: '127.0.0.1',
+                                   Port: 9210,
+                                   Logger: WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
+                                   AccessLog: []) { |server|
         assert_kind_of WEBrick::HTTPServer, server
-        @s = server
-        latch.count_down
+        queue.push(server)
       }
     end
 
-    latch.wait
-    @s.shutdown
+    server = queue.pop
+
+    # The server may not yet have started: wait for it
+    seconds = 10
+    wait_time = 0.1
+    until server.status == :Running || seconds <= 0
+      seconds -= wait_time
+      sleep wait_time
+    end
+
+    raise "Server never reached status 'Running'" unless server.status == :Running
+
+    server.shutdown
     t.join
   end
 
@@ -190,7 +195,7 @@ describe Rack::Handler::WEBrick do
     Rack::Lint.new(lambda{ |req|
       [
         200,
-        {"Transfer-Encoding" => "chunked"},
+        { "Transfer-Encoding" => "chunked" },
         ["7\r\nchunked\r\n0\r\n\r\n"]
       ]
     })
@@ -204,8 +209,8 @@ describe Rack::Handler::WEBrick do
   end
 
   after do
-  @status_thread.join
-  @server.shutdown
-  @thread.join
+    @status_thread.join
+    @server.shutdown
+    @thread.join
   end
 end
