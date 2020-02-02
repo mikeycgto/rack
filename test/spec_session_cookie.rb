@@ -165,7 +165,7 @@ describe Rack::Session::Cookie do
   end
 
   it 'warns if secret is too short' do
-    Rack::Session::Cookie.new(incrementor, secret: @secret[0,16])
+    Rack::Session::Cookie.new(incrementor, secret: @secret[0, 16])
     @warnings.first.must_match(/secret is not long enough/i)
     @warnings.clear
     Rack::Session::Cookie.new(incrementor, secret: @secret)
