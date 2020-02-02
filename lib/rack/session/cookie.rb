@@ -203,7 +203,7 @@ module Rack
           # If session_data is still nil, there is a legacy HMAC
           # configured, try to verify and parse the cookie that way
           if !session_data && @legacy_hmac
-            session_data, _, digest = session_data.rpartition('--')
+            session_data, _, digest = cookie_data.rpartition('--')
             session_data = nil unless digest_match?(session_data, digest)
 
             # Decode using legacy HMAC decoder
