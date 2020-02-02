@@ -1,6 +1,7 @@
+# frozen_string_literal: true
+
 require 'webrick'
 require 'stringio'
-require 'rack/content_length'
 
 # This monkey patch allows for applications to perform their own chunking
 # through WEBrick::HTTPResponse if rack is set to true.
@@ -22,12 +23,18 @@ end
 module Rack
   module Handler
     class WEBrick < ::WEBrick::HTTPServlet::AbstractServlet
-      def self.run(app, options={})
+      def self.run(app, **options)
         environment  = ENV['RACK_ENV'] || 'development'
         default_host = environment == 'development' ? 'localhost' : nil
 
-        options[:BindAddress] = options.delete(:Host) || default_host
+        if !options[:BindAddress] || options[:Host]
+          options[:BindAddress] = options.delete(:Host) || default_host
+        end
         options[:Port] ||= 8080
+        if options[:SSLEnable]
+          require 'webrick/https'
+        end
+
         @server = ::WEBrick::HTTPServer.new(options)
         @server.mount "/", Rack::Handler::WEBrick, app
         yield @server  if block_given?
@@ -79,7 +86,7 @@ module Rack
         env[QUERY_STRING] ||= ""
         unless env[PATH_INFO] == ""
           path, n = req.request_uri.path, env[SCRIPT_NAME].length
-          env[PATH_INFO] = path[n, path.length-n]
+          env[PATH_INFO] = path[n, path.length - n]
         end
         env[REQUEST_PATH] ||= [env[SCRIPT_NAME], env[PATH_INFO]].join
 

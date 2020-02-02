@@ -1,7 +1,6 @@
-require 'minitest/autorun'
-require 'rack/chunked'
-require 'rack/lint'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Chunked do
   def chunked(app)
@@ -16,11 +15,31 @@ describe Rack::Chunked do
 
   before do
     @env = Rack::MockRequest.
-      env_for('/', 'HTTP_VERSION' => '1.1', 'REQUEST_METHOD' => 'GET')
+      env_for('/', 'SERVER_PROTOCOL' => 'HTTP/1.1', 'REQUEST_METHOD' => 'GET')
+  end
+
+  class TrailerBody
+    def each(&block)
+      ['Hello', ' ', 'World!'].each(&block)
+    end
+
+    def trailers
+      { "Expires" => "tomorrow" }
+    end
+  end
+
+  it 'yields trailer headers after the response' do
+    app = lambda { |env|
+      [200, { "Content-Type" => "text/plain", "Trailer" => "Expires" }, TrailerBody.new]
+    }
+    response = Rack::MockResponse.new(*chunked(app).call(@env))
+    response.headers.wont_include 'Content-Length'
+    response.headers['Transfer-Encoding'].must_equal 'chunked'
+    response.body.must_equal "5\r\nHello\r\n1\r\n \r\n6\r\nWorld!\r\n0\r\nExpires: tomorrow\r\n\r\n"
   end
 
   it 'chunk responses with no Content-Length' do
-    app = lambda { |env| [200, {"Content-Type" => "text/plain"}, ['Hello', ' ', 'World!']] }
+    app = lambda { |env| [200, { "Content-Type" => "text/plain" }, ['Hello', ' ', 'World!']] }
     response = Rack::MockResponse.new(*chunked(app).call(@env))
     response.headers.wont_include 'Content-Length'
     response.headers['Transfer-Encoding'].must_equal 'chunked'
@@ -28,27 +47,40 @@ describe Rack::Chunked do
   end
 
   it 'chunks empty bodies properly' do
-    app = lambda { |env| [200, {"Content-Type" => "text/plain"}, []] }
+    app = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
     response = Rack::MockResponse.new(*chunked(app).call(@env))
     response.headers.wont_include 'Content-Length'
     response.headers['Transfer-Encoding'].must_equal 'chunked'
     response.body.must_equal "0\r\n\r\n"
   end
 
+  it 'closes body' do
+    obj = Object.new
+    closed = false
+    def obj.each; yield 's' end
+    obj.define_singleton_method(:close) { closed = true }
+    app = lambda { |env| [200, { "Content-Type" => "text/plain" }, obj] }
+    response = Rack::MockRequest.new(Rack::Chunked.new(app)).get('/', @env)
+    response.headers.wont_include 'Content-Length'
+    response.headers['Transfer-Encoding'].must_equal 'chunked'
+    response.body.must_equal "1\r\ns\r\n0\r\n\r\n"
+    closed.must_equal true
+  end
+
   it 'chunks encoded bodies properly' do
     body = ["\uFFFEHello", " ", "World"].map {|t| t.encode("UTF-16LE") }
-    app  = lambda { |env| [200, {"Content-Type" => "text/plain"}, body] }
+    app  = lambda { |env| [200, { "Content-Type" => "text/plain" }, body] }
     response = Rack::MockResponse.new(*chunked(app).call(@env))
     response.headers.wont_include 'Content-Length'
     response.headers['Transfer-Encoding'].must_equal 'chunked'
     response.body.encoding.to_s.must_equal "ASCII-8BIT"
-    response.body.must_equal "c\r\n\xFE\xFFH\x00e\x00l\x00l\x00o\x00\r\n2\r\n \x00\r\na\r\nW\x00o\x00r\x00l\x00d\x00\r\n0\r\n\r\n".force_encoding("BINARY")
-    response.body.must_equal "c\r\n\xFE\xFFH\x00e\x00l\x00l\x00o\x00\r\n2\r\n \x00\r\na\r\nW\x00o\x00r\x00l\x00d\x00\r\n0\r\n\r\n".force_encoding(Encoding::BINARY)
+    response.body.must_equal "c\r\n\xFE\xFFH\x00e\x00l\x00l\x00o\x00\r\n2\r\n \x00\r\na\r\nW\x00o\x00r\x00l\x00d\x00\r\n0\r\n\r\n".dup.force_encoding("BINARY")
+    response.body.must_equal "c\r\n\xFE\xFFH\x00e\x00l\x00l\x00o\x00\r\n2\r\n \x00\r\na\r\nW\x00o\x00r\x00l\x00d\x00\r\n0\r\n\r\n".dup.force_encoding(Encoding::BINARY)
   end
 
   it 'not modify response when Content-Length header present' do
     app = lambda { |env|
-      [200, {"Content-Type" => "text/plain", 'Content-Length'=>'12'}, ['Hello', ' ', 'World!']]
+      [200, { "Content-Type" => "text/plain", 'Content-Length' => '12' }, ['Hello', ' ', 'World!']]
     }
     status, headers, body = chunked(app).call(@env)
     status.must_equal 200
@@ -58,8 +90,8 @@ describe Rack::Chunked do
   end
 
   it 'not modify response when client is HTTP/1.0' do
-    app = lambda { |env| [200, {"Content-Type" => "text/plain"}, ['Hello', ' ', 'World!']] }
-    @env['HTTP_VERSION'] = 'HTTP/1.0'
+    app = lambda { |env| [200, { "Content-Type" => "text/plain" }, ['Hello', ' ', 'World!']] }
+    @env['SERVER_PROTOCOL'] = 'HTTP/1.0'
     status, headers, body = chunked(app).call(@env)
     status.must_equal 200
     headers.wont_include 'Transfer-Encoding'
@@ -67,7 +99,7 @@ describe Rack::Chunked do
   end
 
   it 'not modify response when client is ancient, pre-HTTP/1.0' do
-    app = lambda { |env| [200, {"Content-Type" => "text/plain"}, ['Hello', ' ', 'World!']] }
+    app = lambda { |env| [200, { "Content-Type" => "text/plain" }, ['Hello', ' ', 'World!']] }
     check = lambda do
       status, headers, body = chunked(app).call(@env.dup)
       status.must_equal 200
@@ -75,16 +107,16 @@ describe Rack::Chunked do
       body.join.must_equal 'Hello World!'
     end
 
-    @env.delete('HTTP_VERSION') # unicorn will do this on pre-HTTP/1.0 requests
+    @env.delete('SERVER_PROTOCOL') # unicorn will do this on pre-HTTP/1.0 requests
     check.call
 
-    @env['HTTP_VERSION'] = 'HTTP/0.9' # not sure if this happens in practice
+    @env['SERVER_PROTOCOL'] = 'HTTP/0.9' # not sure if this happens in practice
     check.call
   end
 
   it 'not modify response when Transfer-Encoding header already present' do
     app = lambda { |env|
-      [200, {"Content-Type" => "text/plain", 'Transfer-Encoding' => 'identity'}, ['Hello', ' ', 'World!']]
+      [200, { "Content-Type" => "text/plain", 'Transfer-Encoding' => 'identity' }, ['Hello', ' ', 'World!']]
     }
     status, headers, body = chunked(app).call(@env)
     status.must_equal 200

@@ -1,13 +1,12 @@
-require 'minitest/autorun'
-require 'rack/directory'
-require 'rack/lint'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 require 'tempfile'
 require 'fileutils'
 
 describe Rack::Directory do
   DOCROOT = File.expand_path(File.dirname(__FILE__)) unless defined? DOCROOT
-  FILE_CATCH = proc{|env| [200, {'Content-Type'=>'text/plain', "Content-Length" => "7"}, ['passed!']] }
+  FILE_CATCH = proc{|env| [200, { 'Content-Type' => 'text/plain', "Content-Length" => "7" }, ['passed!']] }
 
   attr_reader :app
 
@@ -23,11 +22,11 @@ describe Rack::Directory do
       FileUtils.touch File.join(full_dir, "omg.txt")
       app = Rack::Directory.new(dir, FILE_CATCH)
       env = Rack::MockRequest.env_for("/#{plus_dir}/")
-      status,_,body = app.call env
+      status, _, body = app.call env
 
       assert_equal 200, status
 
-      str = ''
+      str = ''.dup
       body.each { |x| str << x }
       assert_match "foo+bar", str
     end
@@ -39,6 +38,32 @@ describe Rack::Directory do
 
     res.must_be :ok?
     assert_match(res, /<html><head>/)
+  end
+
+  it "serve directory indices with bad symlinks" do
+    begin
+      File.symlink('foo', 'test/cgi/foo')
+      res = Rack::MockRequest.new(Rack::Lint.new(app)).
+        get("/cgi/")
+
+      res.must_be :ok?
+      assert_match(res, /<html><head>/)
+    ensure
+      File.delete('test/cgi/foo')
+    end
+  end
+
+  it "return 404 for unreadable directories" do
+    begin
+      File.write('test/cgi/unreadable', '')
+      File.chmod(0, 'test/cgi/unreadable')
+      res = Rack::MockRequest.new(Rack::Lint.new(app)).
+        get("/cgi/unreadable")
+
+      res.status.must_equal 404
+    ensure
+      File.delete('test/cgi/unreadable')
+    end
   end
 
   it "pass to app if file found" do
@@ -95,7 +120,8 @@ describe Rack::Directory do
     res = mr.get("/cgi/test%2bdirectory")
 
     res.must_be :ok?
-    res.body.must_match(%r[/cgi/test\+directory/test\+file])
+    res.body.must_match(Regexp.new(Rack::Utils.escape_html(
+      "/cgi/test\\+directory/test\\+file")))
 
     res = mr.get("/cgi/test%2bdirectory/test%2bfile")
     res.must_be :ok?
@@ -109,13 +135,31 @@ describe Rack::Directory do
       FileUtils.touch File.join(full_dir, "omg omg.txt")
       app = Rack::Directory.new(dir, FILE_CATCH)
       env = Rack::MockRequest.env_for(Rack::Utils.escape_path("/#{space_dir}/"))
-      status,_,body = app.call env
+      status, _, body = app.call env
 
       assert_equal 200, status
 
-      str = ''
+      str = ''.dup
       body.each { |x| str << x }
-      assert_match "/foo%20bar/omg%20omg.txt", str
+      assert_match Rack::Utils.escape_html("/foo%20bar/omg%20omg.txt"), str
+    end
+  end
+
+  it "correctly escape script name with '" do
+    Dir.mktmpdir do |dir|
+      quote_dir = "foo'bar"
+      full_dir = File.join(dir, quote_dir)
+      FileUtils.mkdir full_dir
+      FileUtils.touch File.join(full_dir, "omg'omg.txt")
+      app = Rack::Directory.new(dir, FILE_CATCH)
+      env = Rack::MockRequest.env_for(Rack::Utils.escape("/#{quote_dir}/"))
+      status, _, body = app.call env
+
+      assert_equal 200, status
+
+      str = ''.dup
+      body.each { |x| str << x }
+      assert_match Rack::Utils.escape_html("/foo'bar/omg'omg.txt"), str
     end
   end
 
@@ -132,7 +176,8 @@ describe Rack::Directory do
     res = mr.get("/script-path/cgi/test%2bdirectory")
 
     res.must_be :ok?
-    res.body.must_match(%r[/script-path/cgi/test\+directory/test\+file])
+    res.body.must_match(Regexp.new(Rack::Utils.escape_html(
+      "/script-path/cgi/test\\+directory/test\\+file")))
 
     res = mr.get("/script-path/cgi/test+directory/test+file")
     res.must_be :ok?

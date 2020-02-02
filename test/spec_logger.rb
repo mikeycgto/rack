@@ -1,8 +1,6 @@
-require 'minitest/autorun'
-require 'stringio'
-require 'rack/lint'
-require 'rack/logger'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Logger do
   app = lambda { |env|
@@ -11,7 +9,7 @@ describe Rack::Logger do
     log.info("Program started")
     log.warn("Nothing to do!")
 
-    [200, {'Content-Type' => 'text/plain'}, ["Hello, World!"]]
+    [200, { 'Content-Type' => 'text/plain' }, ["Hello, World!"]]
   }
 
   it "conform to Rack::Lint" do

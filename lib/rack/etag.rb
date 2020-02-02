@@ -1,4 +1,6 @@
-require 'rack'
+# frozen_string_literal: true
+
+require_relative '../rack'
 require 'digest/sha2'
 
 module Rack
@@ -13,7 +15,7 @@ module Rack
   # defaults to nil, while the second defaults to "max-age=0, private, must-revalidate"
   class ETag
     ETAG_STRING = Rack::ETAG
-    DEFAULT_CACHE_CONTROL = "max-age=0, private, must-revalidate".freeze
+    DEFAULT_CACHE_CONTROL = "max-age=0, private, must-revalidate"
 
     def initialize(app, no_cache_control = nil, cache_control = DEFAULT_CACHE_CONTROL)
       @app = app
@@ -55,8 +57,7 @@ module Rack
       end
 
       def skip_caching?(headers)
-        (headers[CACHE_CONTROL] && headers[CACHE_CONTROL].include?('no-cache')) ||
-          headers.key?(ETAG_STRING) || headers.key?('Last-Modified')
+        headers.key?(ETAG_STRING) || headers.key?('Last-Modified')
       end
 
       def digest_body(body)

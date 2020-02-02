@@ -1,4 +1,4 @@
-require 'rack/request'
+# frozen_string_literal: true
 
 module Rack
   module Auth

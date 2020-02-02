@@ -1,8 +1,6 @@
-require 'minitest/autorun'
-require 'rack/common_logger'
-require 'rack/lint'
-require 'rack/mock'
+# frozen_string_literal: true
 
+require_relative 'helper'
 require 'logger'
 
 describe Rack::CommonLogger do
@@ -11,15 +9,15 @@ describe Rack::CommonLogger do
 
   app = Rack::Lint.new lambda { |env|
     [200,
-     {"Content-Type" => "text/html", "Content-Length" => length.to_s},
+     { "Content-Type" => "text/html", "Content-Length" => length.to_s },
      [obj]]}
   app_without_length = Rack::Lint.new lambda { |env|
     [200,
-     {"Content-Type" => "text/html"},
+     { "Content-Type" => "text/html" },
      []]}
   app_with_zero_length = Rack::Lint.new lambda { |env|
     [200,
-     {"Content-Type" => "text/html", "Content-Length" => "0"},
+     { "Content-Type" => "text/html", "Content-Length" => "0" },
      []]}
 
   it "log to rack.errors by default" do
@@ -36,7 +34,7 @@ describe Rack::CommonLogger do
     log.string.must_match(/"GET \/ " 200 #{length} /)
   end
 
-  it "work with standartd library logger" do
+  it "work with standard library logger" do
     logdev = StringIO.new
     log = Logger.new(logdev)
     Rack::MockRequest.new(Rack::CommonLogger.new(app, log)).get("/")
@@ -83,6 +81,22 @@ describe Rack::CommonLogger do
     method.must_equal "GET"
     status.must_equal "200"
     (0..1).must_include duration.to_f
+  end
+
+  it "log path with PATH_INFO" do
+    logdev = StringIO.new
+    log = Logger.new(logdev)
+    Rack::MockRequest.new(Rack::CommonLogger.new(app, log)).get("/hello")
+
+    logdev.string.must_match(/"GET \/hello " 200 #{length} /)
+  end
+
+  it "log path with SCRIPT_NAME" do
+    logdev = StringIO.new
+    log = Logger.new(logdev)
+    Rack::MockRequest.new(Rack::CommonLogger.new(app, log)).get("/path", script_name: "/script")
+
+    logdev.string.must_match(/"GET \/script\/path " 200 #{length} /)
   end
 
   def length

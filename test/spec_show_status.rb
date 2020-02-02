@@ -1,8 +1,6 @@
-require 'minitest/autorun'
-require 'rack/show_status'
-require 'rack/lint'
-require 'rack/mock'
-require 'rack/utils'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::ShowStatus do
   def show_status(app)
@@ -12,10 +10,10 @@ describe Rack::ShowStatus do
   it "provide a default status message" do
     req = Rack::MockRequest.new(
       show_status(lambda{|env|
-        [404, {"Content-Type" => "text/plain", "Content-Length" => "0"}, []]
+        [404, { "Content-Type" => "text/plain", "Content-Length" => "0" }, []]
     }))
 
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
     res.must_be :not_found?
     res.wont_be_empty
 
@@ -29,10 +27,10 @@ describe Rack::ShowStatus do
       show_status(
         lambda{|env|
           env["rack.showstatus.detail"] = "gone too meta."
-          [404, {"Content-Type" => "text/plain", "Content-Length" => "0"}, []]
+          [404, { "Content-Type" => "text/plain", "Content-Length" => "0" }, []]
     }))
 
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
     res.must_be :not_found?
     res.wont_be_empty
 
@@ -42,16 +40,34 @@ describe Rack::ShowStatus do
     assert_match(res, /too meta/)
   end
 
+  it "let the app provide additional information with non-String details" do
+    req = Rack::MockRequest.new(
+      show_status(
+        lambda{|env|
+          env["rack.showstatus.detail"] = ['gone too meta.']
+          [404, { "Content-Type" => "text/plain", "Content-Length" => "0" }, []]
+    }))
+
+    res = req.get("/", lint: true)
+    res.must_be :not_found?
+    res.wont_be_empty
+
+    res["Content-Type"].must_equal "text/html"
+    assert_includes(res.body, '404')
+    assert_includes(res.body, 'Not Found')
+    assert_includes(res.body, '[&quot;gone too meta.&quot;]')
+  end
+
   it "escape error" do
     detail = "<script>alert('hi \"')</script>"
     req = Rack::MockRequest.new(
       show_status(
         lambda{|env|
           env["rack.showstatus.detail"] = detail
-          [500, {"Content-Type" => "text/plain", "Content-Length" => "0"}, []]
+          [500, { "Content-Type" => "text/plain", "Content-Length" => "0" }, []]
     }))
 
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
     res.wont_be_empty
 
     res["Content-Type"].must_equal "text/html"
@@ -64,21 +80,21 @@ describe Rack::ShowStatus do
     req = Rack::MockRequest.new(
       show_status(
         lambda{|env|
-          [404, {"Content-Type" => "text/plain", "Content-Length" => "4"}, ["foo!"]]
+          [404, { "Content-Type" => "text/plain", "Content-Length" => "4" }, ["foo!"]]
     }))
 
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
     res.must_be :not_found?
 
     res.body.must_equal "foo!"
   end
 
   it "pass on original headers" do
-    headers = {"WWW-Authenticate" => "Basic blah"}
+    headers = { "WWW-Authenticate" => "Basic blah" }
 
     req = Rack::MockRequest.new(
       show_status(lambda{|env| [401, headers, []] }))
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
 
     res["WWW-Authenticate"].must_equal "Basic blah"
   end
@@ -88,10 +104,10 @@ describe Rack::ShowStatus do
       show_status(
         lambda{|env|
           env["rack.showstatus.detail"] = "gone too meta."
-          [404, {"Content-Type" => "text/plain", "Content-Length" => "4"}, ["foo!"]]
+          [404, { "Content-Type" => "text/plain", "Content-Length" => "4" }, ["foo!"]]
     }))
 
-    res = req.get("/", :lint => true)
+    res = req.get("/", lint: true)
     res.must_be :not_found?
     res.wont_be_empty
 

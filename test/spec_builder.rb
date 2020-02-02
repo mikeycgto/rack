@@ -1,12 +1,9 @@
-require 'minitest/autorun'
-require 'rack/builder'
-require 'rack/lint'
-require 'rack/mock'
-require 'rack/show_exceptions'
-require 'rack/urlmap'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 class NothingMiddleware
-  def initialize(app)
+  def initialize(app, **)
     @app = app
   end
   def call(env)
@@ -31,28 +28,54 @@ describe Rack::Builder do
   it "supports mapping" do
     app = builder_to_app do
       map '/' do |outer_env|
-        run lambda { |inner_env| [200, {"Content-Type" => "text/plain"}, ['root']] }
+        run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['root']] }
       end
       map '/sub' do
-        run lambda { |inner_env| [200, {"Content-Type" => "text/plain"}, ['sub']] }
+        run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['sub']] }
       end
     end
     Rack::MockRequest.new(app).get("/").body.to_s.must_equal 'root'
     Rack::MockRequest.new(app).get("/sub").body.to_s.must_equal 'sub'
   end
 
+  it "supports use when mapping" do
+    app = builder_to_app do
+      map '/sub' do
+        use Rack::ContentLength
+        run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['sub']] }
+      end
+      use Rack::ContentLength
+      run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['root']] }
+    end
+    Rack::MockRequest.new(app).get("/").headers['Content-Length'].must_equal '4'
+    Rack::MockRequest.new(app).get("/sub").headers['Content-Length'].must_equal '3'
+  end
+
   it "doesn't dupe env even when mapping" do
     app = builder_to_app do
-      use NothingMiddleware
+      use NothingMiddleware, noop: :noop
       map '/' do |outer_env|
         run lambda { |inner_env|
           inner_env['new_key'] = 'new_value'
-          [200, {"Content-Type" => "text/plain"}, ['root']]
+          [200, { "Content-Type" => "text/plain" }, ['root']]
         }
       end
     end
     Rack::MockRequest.new(app).get("/").body.to_s.must_equal 'root'
     NothingMiddleware.env['new_key'].must_equal 'new_value'
+  end
+
+  it "dupe #to_app when mapping so Rack::Reloader can reload the application on each request" do
+    app = builder do
+      map '/' do |outer_env|
+        run lambda { |env|  [200, { "Content-Type" => "text/plain" }, [object_id.to_s]] }
+      end
+    end
+
+    builder_app1_id = Rack::MockRequest.new(app).get("/").body.to_s
+    builder_app2_id = Rack::MockRequest.new(app).get("/").body.to_s
+
+    builder_app2_id.wont_equal builder_app1_id
   end
 
   it "chains apps by default" do
@@ -84,7 +107,7 @@ describe Rack::Builder do
         'secret' == password
       end
 
-      run lambda { |env| [200, {"Content-Type" => "text/plain"}, ['Hi Boss']] }
+      run lambda { |env| [200, { "Content-Type" => "text/plain" }, ['Hi Boss']] }
     end
 
     response = Rack::MockRequest.new(app).get("/")
@@ -112,9 +135,9 @@ describe Rack::Builder do
   it "can mix map and run for endpoints" do
     app = builder do
       map '/sub' do
-        run lambda { |inner_env| [200, {"Content-Type" => "text/plain"}, ['sub']] }
+        run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['sub']] }
       end
-      run lambda { |inner_env| [200, {"Content-Type" => "text/plain"}, ['root']] }
+      run lambda { |inner_env| [200, { "Content-Type" => "text/plain" }, ['root']] }
     end
 
     Rack::MockRequest.new(app).get("/").body.to_s.must_equal 'root'
@@ -151,7 +174,7 @@ describe Rack::Builder do
         def call(env)
           raise "bzzzt"  if @called > 0
         @called += 1
-          [200, {'Content-Type' => 'text/plain'}, ['OK']]
+          [200, { 'Content-Type' => 'text/plain' }, ['OK']]
         end
       end
 
@@ -184,7 +207,7 @@ describe Rack::Builder do
       end)
       o = Object.new
       def o.call(env)
-        @a = 1 if env['PATH_INFO'] == '/b'; 
+        @a = 1 if env['PATH_INFO'] == '/b';
         [200, {}, []]
       end
       run o
@@ -225,13 +248,6 @@ describe Rack::Builder do
       env.must_equal({})
     end
 
-    it "requires anything not ending in .ru" do
-      $: << File.dirname(__FILE__)
-      app, * = Rack::Builder.parse_file 'builder/anything'
-      Rack::MockRequest.new(app).get("/").body.to_s.must_equal 'OK'
-      $:.pop
-    end
-
     it 'requires an_underscore_app not ending in .ru' do
       $: << File.dirname(__FILE__)
       app, * = Rack::Builder.parse_file 'builder/an_underscore_app'
@@ -241,7 +257,18 @@ describe Rack::Builder do
 
     it "sets __LINE__ correctly" do
       app, _ = Rack::Builder.parse_file config_file('line.ru')
-      Rack::MockRequest.new(app).get("/").body.to_s.must_equal '1'
+      Rack::MockRequest.new(app).get("/").body.to_s.must_equal '3'
+    end
+
+    it "strips leading unicode byte order mark when present" do
+      enc = Encoding.default_external
+      begin
+        Encoding.default_external = 'UTF-8'
+        app, _ = Rack::Builder.parse_file config_file('bom.ru')
+        Rack::MockRequest.new(app).get("/").body.to_s.must_equal 'OK'
+      ensure
+        Encoding.default_external = enc
+      end
     end
   end
 

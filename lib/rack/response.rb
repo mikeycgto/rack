@@ -1,7 +1,5 @@
-require 'rack/request'
-require 'rack/utils'
-require 'rack/body_proxy'
-require 'rack/media_type'
+# frozen_string_literal: true
+
 require 'time'
 
 module Rack
@@ -17,38 +15,57 @@ module Rack
   # +write+ are synchronous with the Rack response.
   #
   # Your application's +call+ should end returning Response#finish.
-
   class Response
-    attr_accessor :length, :status, :body
-    attr_reader :header
-    alias headers header
-
-    CHUNKED = 'chunked'.freeze
-
-    def initialize(body=[], status=200, header={})
-      @status = status.to_i
-      @header = Utils::HeaderHash.new.merge(header)
-
-      @writer  = lambda { |x| @body << x }
-      @block   = nil
-      @length  = 0
-
-      @body = []
-
-      if body.respond_to? :to_str
-        write body.to_str
-      elsif body.respond_to?(:each)
-        body.each { |part|
-          write part.to_s
-        }
-      else
-        raise TypeError, "stringable or iterable required"
-      end
-
-      yield self  if block_given?
+    def self.[](status, headers, body)
+      self.new(body, status, headers)
     end
 
-    def redirect(target, status=302)
+    CHUNKED = 'chunked'
+    STATUS_WITH_NO_ENTITY_BODY = Utils::STATUS_WITH_NO_ENTITY_BODY
+
+    attr_accessor :length, :status, :body
+    attr_reader :headers
+
+    # @deprecated Use {#headers} instead.
+    alias header headers
+
+    # Initialize the response object with the specified body, status
+    # and headers.
+    #
+    # @param body [nil, #each, #to_str] the response body.
+    # @param status [Integer] the integer status as defined by the
+    # HTTP protocol RFCs.
+    # @param headers [#each] a list of key-value header pairs which
+    # conform to the HTTP protocol RFCs.
+    #
+    # Providing a body which responds to #to_str is legacy behaviour.
+    def initialize(body = nil, status = 200, headers = {})
+      @status = status.to_i
+      @headers = Utils::HeaderHash.new(headers)
+
+      @writer = self.method(:append)
+
+      @block = nil
+
+      # Keep track of whether we have expanded the user supplied body.
+      if body.nil?
+        @body = []
+        @buffered = true
+        @length = 0
+      elsif body.respond_to?(:to_str)
+        @body = [body]
+        @buffered = true
+        @length = body.to_str.bytesize
+      else
+        @body = body
+        @buffered = false
+        @length = 0
+      end
+
+      yield self if block_given?
+    end
+
+    def redirect(target, status = 302)
       self.status = status
       self.location = target
     end
@@ -57,42 +74,49 @@ module Rack
       CHUNKED == get_header(TRANSFER_ENCODING)
     end
 
+    # Generate a response array consistent with the requirements of the SPEC.
+    # @return [Array] a 3-tuple suitable of `[status, headers, body]`
+    # which is suitable to be returned from the middleware `#call(env)` method.
     def finish(&block)
-      @block = block
-
-      if [204, 304].include?(status.to_i)
+      if STATUS_WITH_NO_ENTITY_BODY[status.to_i]
         delete_header CONTENT_TYPE
         delete_header CONTENT_LENGTH
         close
         [status.to_i, header, []]
       else
-        [status.to_i, header, BodyProxy.new(self){}]
+        if block_given?
+          @block = block
+          [status.to_i, header, self]
+        else
+          [status.to_i, header, @body]
+        end
       end
     end
+
     alias to_a finish           # For *response
-    alias to_ary finish         # For implicit-splat on Ruby 1.9.2
 
     def each(&callback)
       @body.each(&callback)
-      @writer = callback
-      @block.call(self)  if @block
+      @buffered = true
+
+      if @block
+        @writer = callback
+        @block.call(self)
+      end
     end
 
     # Append to body and update Content-Length.
     #
     # NOTE: Do not mix #write and direct #body access!
     #
-    def write(str)
-      s = str.to_s
-      @length += s.bytesize unless chunked?
-      @writer.call s
+    def write(chunk)
+      buffered_body!
 
-      set_header(CONTENT_LENGTH, @length.to_s) unless chunked?
-      str
+      @writer.call(chunk.to_s)
     end
 
     def close
-      body.close if body.respond_to?(:close)
+      @body.close if @body.respond_to?(:close)
     end
 
     def empty?
@@ -184,7 +208,7 @@ module Rack
         set_header SET_COOKIE, ::Rack::Utils.add_cookie_to_header(cookie_header, key, value)
       end
 
-      def delete_cookie(key, value={})
+      def delete_cookie(key, value = {})
         set_header SET_COOKIE, ::Rack::Utils.add_remove_cookie_to_header(get_header(SET_COOKIE), key, value)
       end
 
@@ -210,6 +234,43 @@ module Rack
 
       def etag= v
         set_header ETAG, v
+      end
+
+    protected
+
+      def buffered_body!
+        return if @buffered
+
+        if @body.is_a?(Array)
+          # The user supplied body was an array:
+          @body = @body.compact
+          @body.each do |part|
+            @length += part.to_s.bytesize
+          end
+        else
+          # Turn the user supplied body into a buffered array:
+          body = @body
+          @body = Array.new
+
+          body.each do |part|
+            @writer.call(part.to_s)
+          end
+
+          body.close if body.respond_to?(:close)
+        end
+
+        @buffered = true
+      end
+
+      def append(chunk)
+        @body << chunk
+
+        unless chunked?
+          @length += chunk.bytesize
+          set_header(CONTENT_LENGTH, @length.to_s)
+        end
+
+        return chunk
       end
     end
 

@@ -1,8 +1,7 @@
-require 'minitest/autorun'
-require 'stringio'
+# frozen_string_literal: true
+
+require_relative 'helper'
 require 'tempfile'
-require 'rack/lint'
-require 'rack/mock'
 
 describe Rack::Lint do
   def env(*args)
@@ -11,7 +10,7 @@ describe Rack::Lint do
 
   it "pass valid request" do
     Rack::Lint.new(lambda { |env|
-                     [200, {"Content-type" => "test/plain", "Content-length" => "3"}, ["foo"]]
+                     [200, { "Content-type" => "test/plain", "Content-length" => "3" }, ["foo"]]
                    }).call(env({})).first.must_equal 200
   end
 
@@ -23,6 +22,10 @@ describe Rack::Lint do
   it "notice environment errors" do
     lambda { Rack::Lint.new(nil).call 5 }.must_raise(Rack::Lint::LintError).
       message.must_match(/not a Hash/)
+
+    lambda { Rack::Lint.new(nil).call({}.freeze) }.must_raise(Rack::Lint::LintError).
+      message.must_match(/env should not be frozen, but is/)
+
 
     lambda {
       e = env
@@ -70,9 +73,65 @@ describe Rack::Lint do
       message.must_equal "session [] must respond to store and []="
 
     lambda {
-      Rack::Lint.new(nil).call(env("rack.logger" => []))
+      Rack::Lint.new(nil).call(env("rack.session" => {}.freeze))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "session {} must respond to to_hash and return unfrozen Hash instance"
+
+    obj = {}
+    obj.singleton_class.send(:undef_method, :to_hash)
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.session" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "session {} must respond to to_hash and return unfrozen Hash instance"
+
+    obj.singleton_class.send(:undef_method, :clear)
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.session" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "session {} must respond to clear"
+
+    obj.singleton_class.send(:undef_method, :delete)
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.session" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "session {} must respond to delete"
+
+    obj.singleton_class.send(:undef_method, :fetch)
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.session" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "session {} must respond to fetch and []"
+
+    obj = Object.new
+    def obj.inspect; '[]' end
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.logger" => obj))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "logger [] must respond to info"
+
+    def obj.info(*) end
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.logger" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "logger [] must respond to debug"
+
+    def obj.debug(*) end
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.logger" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "logger [] must respond to warn"
+
+    def obj.warn(*) end
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.logger" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "logger [] must respond to error"
+
+    def obj.error(*) end
+    lambda {
+      Rack::Lint.new(nil).call(env("rack.logger" => obj))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "logger [] must respond to fatal"
 
     lambda {
       Rack::Lint.new(nil).call(env("rack.multipart.buffer_size" => 0))
@@ -90,6 +149,14 @@ describe Rack::Lint do
       }).call(env("rack.multipart.tempfile_factory" => lambda { |filename, content_type| Object.new }))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "rack.multipart.tempfile_factory return value must respond to #<<"
+
+    lambda {
+      Rack::Lint.new(lambda { |env|
+        env['rack.multipart.tempfile_factory'].call("testfile", "text/plain")
+        []
+      }).call(env("rack.multipart.tempfile_factory" => lambda { |filename, content_type| String.new }))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_equal "response array [] has 0 elements instead of 3"
 
     lambda {
       Rack::Lint.new(nil).call(env("REQUEST_METHOD" => "FUCKUP?"))
@@ -110,6 +177,20 @@ describe Rack::Lint do
       Rack::Lint.new(nil).call(env("CONTENT_LENGTH" => "xcii"))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/Invalid CONTENT_LENGTH/)
+
+    lambda {
+      Rack::Lint.new(nil).call(env("QUERY_STRING" => nil))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_include('env variable QUERY_STRING has non-string value nil')
+
+    lambda {
+      Rack::Lint.new(nil).call(env("QUERY_STRING" => "\u1234"))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_include('env variable QUERY_STRING has value containing non-ASCII characters and has non-ASCII-8BIT encoding')
+
+    Rack::Lint.new(lambda { |env|
+                     [200, {}, []]
+                   }).call(env("QUERY_STRING" => "\u1234".b)).first.must_equal 200
 
     lambda {
       e = env
@@ -156,9 +237,27 @@ describe Rack::Lint do
 
   it "notice error errors" do
     lambda {
-      Rack::Lint.new(nil).call(env("rack.errors" => ""))
+      io = StringIO.new
+      io.binmode
+      Rack::Lint.new(nil).call(env("rack.errors" => "", "rack.input" => io))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/does not respond to #puts/)
+  end
+
+  it "notice response errors" do
+    lambda {
+      Rack::Lint.new(lambda { |env|
+                       ""
+                     }).call(env({}))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_include('response "" is not an Array , but String')
+
+    lambda {
+      Rack::Lint.new(lambda { |env|
+                       [nil, nil, nil, nil]
+                     }).call(env({}))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_include('response array [nil, nil, nil, nil] has 4 elements instead of 3')
   end
 
   it "notice status errors" do
@@ -179,22 +278,25 @@ describe Rack::Lint do
 
   it "notice header errors" do
     lambda {
+      io = StringIO.new('a')
+      io.binmode
       Rack::Lint.new(lambda { |env|
+                       env['rack.input'].each{ |x| }
                        [200, Object.new, []]
-                     }).call(env({}))
+                     }).call(env({ "rack.input" => io }))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "headers object should respond to #each, but doesn't (got Object as headers)"
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {true=>false}, []]
+                       [200, { true => false }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "header key must be a string, was TrueClass"
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Status" => "404"}, []]
+                       [200, { "Status" => "404" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/must not contain Status/)
@@ -216,7 +318,7 @@ describe Rack::Lint do
     invalid_headers.each do |invalid_header|
       lambda {
         Rack::Lint.new(lambda { |env|
-          [200, {invalid_header => "text/plain"}, []]
+          [200, { invalid_header => "text/plain" }, []]
         }).call(env({}))
       }.must_raise(Rack::Lint::LintError, "on invalid header: #{invalid_header}").
       message.must_equal("invalid header name: #{invalid_header}")
@@ -224,20 +326,20 @@ describe Rack::Lint do
     valid_headers = 0.upto(127).map(&:chr) - invalid_headers
     valid_headers.each do |valid_header|
       Rack::Lint.new(lambda { |env|
-                       [200, {valid_header => "text/plain"}, []]
+                       [200, { valid_header => "text/plain" }, []]
                      }).call(env({})).first.must_equal 200
     end
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Foo" => Object.new}, []]
+                       [200, { "Foo" => Object.new }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "a header value must be a String, but the value of 'Foo' is a Object"
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Foo" => [1, 2, 3]}, []]
+                       [200, { "Foo" => [1, 2, 3] }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_equal "a header value must be a String, but the value of 'Foo' is a Array"
@@ -245,14 +347,14 @@ describe Rack::Lint do
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Foo-Bar" => "text\000plain"}, []]
+                       [200, { "Foo-Bar" => "text\000plain" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/invalid header/)
 
     # line ends (010).must_be :allowed in header values.?
     Rack::Lint.new(lambda { |env|
-                     [200, {"Foo-Bar" => "one\ntwo\nthree", "Content-Length" => "0", "Content-Type" => "text/plain" }, []]
+                     [200, { "Foo-Bar" => "one\ntwo\nthree", "Content-Length" => "0", "Content-Type" => "text/plain" }, []]
                    }).call(env({})).first.must_equal 200
 
     # non-Hash header responses.must_be :allowed?
@@ -272,7 +374,7 @@ describe Rack::Lint do
     [100, 101, 204, 304].each do |status|
       lambda {
         Rack::Lint.new(lambda { |env|
-                         [status, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                         [status, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                        }).call(env({}))
       }.must_raise(Rack::Lint::LintError).
         message.must_match(/Content-Type header found/)
@@ -283,7 +385,7 @@ describe Rack::Lint do
     [100, 101, 204, 304].each do |status|
       lambda {
         Rack::Lint.new(lambda { |env|
-                         [status, {"Content-length" => "0"}, []]
+                         [status, { "Content-length" => "0" }, []]
                        }).call(env({}))
       }.must_raise(Rack::Lint::LintError).
         message.must_match(/Content-Length header found/)
@@ -291,7 +393,7 @@ describe Rack::Lint do
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Content-type" => "text/plain", "Content-Length" => "1"}, []]
+                       [200, { "Content-type" => "text/plain", "Content-Length" => "1" }, []]
                      }).call(env({}))[2].each { }
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/Content-Length header was 1, but should be 0/)
@@ -300,7 +402,7 @@ describe Rack::Lint do
   it "notice body errors" do
     lambda {
       body = Rack::Lint.new(lambda { |env|
-                               [200, {"Content-type" => "text/plain","Content-length" => "3"}, [1,2,3]]
+                               [200, { "Content-type" => "text/plain", "Content-length" => "3" }, [1, 2, 3]]
                              }).call(env({}))[2]
       body.each { |part| }
     }.must_raise(Rack::Lint::LintError).
@@ -311,15 +413,16 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].gets("\r\n")
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/gets called with arguments/)
 
     lambda {
       Rack::Lint.new(lambda { |env|
+                       env["rack.input"].gets
                        env["rack.input"].read(1, 2, 3)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read called with too many arguments/)
@@ -327,7 +430,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read("foo")
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read called with non-integer and non-nil length/)
@@ -335,7 +438,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read(-1)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read called with a negative length/)
@@ -343,7 +446,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read(nil, nil)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read called with non-String buffer/)
@@ -351,7 +454,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read(nil, 1)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read called with non-String buffer/)
@@ -359,7 +462,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].rewind(0)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/rewind called with arguments/)
@@ -404,7 +507,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].gets
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env("rack.input" => weirdio))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/gets didn't return a String/)
@@ -412,7 +515,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].each { |x| }
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env("rack.input" => weirdio))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/each didn't yield a String/)
@@ -420,7 +523,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env("rack.input" => weirdio))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read didn't return nil or a String/)
@@ -428,7 +531,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].read
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env("rack.input" => eof_weirdio))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/read\(nil\) returned nil on EOF/)
@@ -436,7 +539,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].rewind
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env("rack.input" => weirdio))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/rewind raised Errno::ESPIPE/)
@@ -445,7 +548,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.input"].close
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/close must not be called/)
@@ -455,7 +558,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.errors"].write(42)
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/write not called with a String/)
@@ -463,7 +566,7 @@ describe Rack::Lint do
     lambda {
       Rack::Lint.new(lambda { |env|
                        env["rack.errors"].close
-                       [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
                      }).call(env({}))
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/close must not be called/)
@@ -471,25 +574,25 @@ describe Rack::Lint do
 
   it "notice HEAD errors" do
     Rack::Lint.new(lambda { |env|
-                     [200, {"Content-type" => "test/plain", "Content-length" => "3"}, []]
-                   }).call(env({"REQUEST_METHOD" => "HEAD"})).first.must_equal 200
+                     [200, { "Content-type" => "test/plain", "Content-length" => "3" }, []]
+                   }).call(env({ "REQUEST_METHOD" => "HEAD" })).first.must_equal 200
 
     lambda {
       Rack::Lint.new(lambda { |env|
-                       [200, {"Content-type" => "test/plain", "Content-length" => "3"}, ["foo"]]
-                     }).call(env({"REQUEST_METHOD" => "HEAD"}))[2].each { }
+                       [200, { "Content-type" => "test/plain", "Content-length" => "3" }, ["foo"]]
+                     }).call(env({ "REQUEST_METHOD" => "HEAD" }))[2].each { }
     }.must_raise(Rack::Lint::LintError).
       message.must_match(/body was given for HEAD/)
   end
 
   def assert_lint(*args)
-    hello_str = "hello world"
+    hello_str = "hello world".dup
     hello_str.force_encoding(Encoding::ASCII_8BIT)
 
     Rack::Lint.new(lambda { |env|
                      env["rack.input"].send(:read, *args)
-                     [201, {"Content-type" => "text/plain", "Content-length" => "0"}, []]
-                   }).call(env({"rack.input" => StringIO.new(hello_str)})).
+                     [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
+                   }).call(env({ "rack.input" => StringIO.new(hello_str) })).
       first.must_equal 201
   end
 
@@ -498,9 +601,31 @@ describe Rack::Lint do
     assert_lint 0
     assert_lint 1
     assert_lint nil
-    assert_lint nil, ''
-    assert_lint 1, ''
+    assert_lint nil, ''.dup
+    assert_lint 1, ''.dup
   end
+
+  it "notice hijack errors" do
+    lambda {
+      Rack::Lint.new(lambda { |env|
+                       env['rack.hijack'].call
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
+                     }).call(env({ 'rack.hijack?' => true, 'rack.hijack' => lambda { Object.new } }))
+    }.must_raise(Rack::Lint::LintError).
+      message.must_match(/rack.hijack_io must respond to read/)
+
+      Rack::Lint.new(lambda { |env|
+                       env['rack.hijack'].call
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0" }, []]
+                     }).call(env({ 'rack.hijack?' => true, 'rack.hijack' => lambda { StringIO.new }, 'rack.hijack_io' => StringIO.new })).
+        first.must_equal 201
+
+      Rack::Lint.new(lambda { |env|
+                       env['rack.hijack?'] = true
+                       [201, { "Content-type" => "text/plain", "Content-length" => "0", 'rack.hijack' => lambda {|io| io }, 'rack.hijack_io' => StringIO.new }, []]
+                     }).call(env({}))[1]['rack.hijack'].call(StringIO.new).read.must_equal ''
+  end
+
 end
 
 describe "Rack::Lint::InputWrapper" do

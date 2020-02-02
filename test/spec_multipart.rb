@@ -1,11 +1,7 @@
-# coding: utf-8
+# frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'rack'
-require 'rack/multipart'
-require 'rack/multipart/parser'
-require 'rack/utils'
-require 'rack/mock'
+require_relative 'helper'
+require 'timeout'
 
 describe Rack::Multipart do
   def multipart_fixture(name, boundary = "AaB03x")
@@ -28,6 +24,23 @@ describe Rack::Multipart do
     env = Rack::MockRequest.env_for("/",
             "CONTENT_TYPE" => 'application/x-www-form-urlencoded')
     Rack::Multipart.parse_multipart(env).must_be_nil
+  end
+
+  it "parse multipart content when content type present but disposition is not" do
+    env = Rack::MockRequest.env_for("/", multipart_fixture(:content_type_and_no_disposition))
+    params = Rack::Multipart.parse_multipart(env)
+    params["text/plain; charset=US-ASCII"].must_equal ["contents"]
+  end
+
+  it "parse multipart content when content type present but disposition is not when using IO" do
+    read, write = IO.pipe
+    env = multipart_fixture(:content_type_and_no_disposition)
+    write.write(env[:input].read)
+    write.close
+    env[:input] = read
+    env = Rack::MockRequest.env_for("/", multipart_fixture(:content_type_and_no_disposition))
+    params = Rack::Multipart.parse_multipart(env)
+    params["text/plain; charset=US-ASCII"].must_equal ["contents"]
   end
 
   it "parse multipart content when content type present but filename is not" do
@@ -146,6 +159,31 @@ describe Rack::Multipart do
     wr.close
   end
 
+  # see https://github.com/rack/rack/pull/1309
+  it "parse strange multipart pdf" do
+    boundary = '---------------------------932620571087722842402766118'
+
+    data = StringIO.new
+    data.write("--#{boundary}")
+    data.write("\r\n")
+    data.write('Content-Disposition: form-data; name="a"; filename="a.pdf"')
+    data.write("\r\n")
+    data.write("Content-Type:application/pdf\r\n")
+    data.write("\r\n")
+    data.write("-" * (1024 * 1024))
+    data.write("\r\n")
+    data.write("--#{boundary}--\r\n")
+
+    fixture = {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}",
+      "CONTENT_LENGTH" => data.length.to_s,
+      :input => data,
+    }
+
+    env = Rack::MockRequest.env_for '/', fixture
+    Timeout::timeout(10) { Rack::Multipart.parse_multipart(env) }
+  end
+
   it 'raises an EOF error on content-length mistmatch' do
     env = Rack::MockRequest.env_for("/", multipart_fixture(:empty))
     env['rack.input'] = StringIO.new
@@ -172,7 +210,7 @@ describe Rack::Multipart do
     c = Class.new(Rack::QueryParser::Params) do
       def initialize(*)
         super
-        @params = Hash.new{|h,k| h[k.to_s] if k.is_a?(Symbol)}
+        @params = Hash.new{|h, k| h[k.to_s] if k.is_a?(Symbol)}
       end
     end
     query_parser = Rack::QueryParser.new c, 65536, 100
@@ -201,7 +239,7 @@ describe Rack::Multipart do
 
   it "parse multipart upload file using custom tempfile class" do
     env = Rack::MockRequest.env_for("/", multipart_fixture(:text))
-    my_tempfile = ""
+    my_tempfile = "".dup
     env['rack.multipart.tempfile_factory'] = lambda { |filename, content_type| my_tempfile }
     params = Rack::Multipart.parse_multipart(env)
     params["files"][:tempfile].object_id.must_equal my_tempfile.object_id
@@ -306,6 +344,12 @@ describe Rack::Multipart do
     params["files"][:filename].must_equal "flowers.exe\u0000.jpg"
   end
 
+  it "is robust separating Content-Disposition fields" do
+    env = Rack::MockRequest.env_for("/", multipart_fixture(:robust_field_separation))
+    params = Rack::Multipart.parse_multipart(env)
+    params["text"].must_equal "contents"
+  end
+
   it "not include file params if no file was selected" do
     env = Rack::MockRequest.env_for("/", multipart_fixture(:none))
     params = Rack::Multipart.parse_multipart(env)
@@ -358,6 +402,19 @@ describe Rack::Multipart do
     params["files"][:head].must_equal "Content-Disposition: form-data; " +
       "name=\"files\"; " +
       "filename=\"escape \\\"quotes\"\r\n" +
+      "Content-Type: application/octet-stream\r\n"
+    params["files"][:name].must_equal "files"
+    params["files"][:tempfile].read.must_equal "contents"
+  end
+
+  it "parse filename with plus character" do
+    env = Rack::MockRequest.env_for("/", multipart_fixture(:filename_with_plus))
+    params = Rack::Multipart.parse_multipart(env)
+    params["files"][:type].must_equal "application/octet-stream"
+    params["files"][:filename].must_equal "foo+bar"
+    params["files"][:head].must_equal "Content-Disposition: form-data; " +
+      "name=\"files\"; " +
+      "filename=\"foo+bar\"\r\n" +
       "Content-Type: application/octet-stream\r\n"
     params["files"][:name].must_equal "files"
     params["files"][:tempfile].read.must_equal "contents"
@@ -475,9 +532,9 @@ Content-Type: image/jpeg\r
     params["files"][:tempfile].read.must_equal "contents"
   end
 
-  it "builds nested multipart body" do
+  it "builds nested multipart body using array" do
     files = Rack::Multipart::UploadedFile.new(multipart_file("file1.txt"))
-    data  = Rack::Multipart.build_multipart("people" => [{"submit-name" => "Larry", "files" => files}])
+    data  = Rack::Multipart.build_multipart("people" => [{ "submit-name" => "Larry", "files" => files }])
 
     options = {
       "CONTENT_TYPE" => "multipart/form-data; boundary=AaB03x",
@@ -489,6 +546,38 @@ Content-Type: image/jpeg\r
     params["people"][0]["submit-name"].must_equal "Larry"
     params["people"][0]["files"][:filename].must_equal "file1.txt"
     params["people"][0]["files"][:tempfile].read.must_equal "contents"
+  end
+
+  it "builds nested multipart body using hash" do
+    files = Rack::Multipart::UploadedFile.new(multipart_file("file1.txt"))
+    data  = Rack::Multipart.build_multipart("people" => { "foo" => { "submit-name" => "Larry", "files" => files } })
+
+    options = {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=AaB03x",
+      "CONTENT_LENGTH" => data.length.to_s,
+      :input => StringIO.new(data)
+    }
+    env = Rack::MockRequest.env_for("/", options)
+    params = Rack::Multipart.parse_multipart(env)
+    params["people"]["foo"]["submit-name"].must_equal "Larry"
+    params["people"]["foo"]["files"][:filename].must_equal "file1.txt"
+    params["people"]["foo"]["files"][:tempfile].read.must_equal "contents"
+  end
+
+  it "builds multipart body from StringIO" do
+    files = Rack::Multipart::UploadedFile.new(io: StringIO.new('foo'), filename: 'bar.txt')
+    data  = Rack::Multipart.build_multipart("submit-name" => "Larry", "files" => files)
+
+    options = {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=AaB03x",
+      "CONTENT_LENGTH" => data.length.to_s,
+      :input => StringIO.new(data)
+    }
+    env = Rack::MockRequest.env_for("/", options)
+    params = Rack::Multipart.parse_multipart(env)
+    params["submit-name"].must_equal "Larry"
+    params["files"][:filename].must_equal "bar.txt"
+    params["files"][:tempfile].read.must_equal "foo"
   end
 
   it "can parse fields that end at the end of the buffer" do
@@ -557,7 +646,7 @@ Content-Type: image/jpeg\r
   end
 
   it "return nil if no UploadedFiles were used" do
-    data = Rack::Multipart.build_multipart("people" => [{"submit-name" => "Larry", "files" => "contents"}])
+    data = Rack::Multipart.build_multipart("people" => [{ "submit-name" => "Larry", "files" => "contents" }])
     data.must_be_nil
   end
 
@@ -584,7 +673,7 @@ EOF
     env = Rack::MockRequest.env_for("/", options)
     params = Rack::Multipart.parse_multipart(env)
 
-    params.must_equal "description"=>"Very very blue"
+    params.must_equal "description" => "Very very blue"
   end
 
   it "parse multipart upload with no content-length header" do
@@ -683,7 +772,7 @@ true\r
   it "fallback to content-type for name" do
     rack_logo = File.read(multipart_file("rack-logo.png"))
 
-    data = <<-EOF
+    data = <<-EOF.dup
 --AaB03x\r
 Content-Type: text/plain\r
 \r
@@ -702,7 +791,7 @@ Content-Type: image/png\r
     options = {
       "CONTENT_TYPE" => "multipart/related; boundary=AaB03x",
       "CONTENT_LENGTH" => data.bytesize.to_s,
-      :input => StringIO.new(data)
+      :input => StringIO.new(data.dup)
     }
     env = Rack::MockRequest.env_for("/", options)
     params = Rack::Multipart.parse_multipart(env)

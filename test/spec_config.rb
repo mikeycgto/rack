@@ -1,9 +1,6 @@
-require 'minitest/autorun'
-require 'rack/builder'
-require 'rack/config'
-require 'rack/content_length'
-require 'rack/lint'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Config do
   it "accept a block that modifies the environment" do
@@ -13,7 +10,7 @@ describe Rack::Config do
         env['greeting'] = 'hello'
       end
       run lambda { |env|
-        [200, {'Content-Type' => 'text/plain'}, [env['greeting'] || '']]
+        [200, { 'Content-Type' => 'text/plain' }, [env['greeting'] || '']]
       }
     end
 

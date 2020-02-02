@@ -1,6 +1,6 @@
-# -*- encoding: utf-8 -*-
-require 'minitest/autorun'
-require 'rack'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack do
   describe 'version' do

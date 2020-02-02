@@ -1,5 +1,6 @@
-require 'minitest/autorun'
-require 'rack/handler'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 class Rack::Handler::Lobster; end
 class RockLobster; end

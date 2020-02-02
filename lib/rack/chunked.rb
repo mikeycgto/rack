@@ -1,4 +1,4 @@
-require 'rack/utils'
+# frozen_string_literal: true
 
 module Rack
 
@@ -10,7 +10,7 @@ module Rack
     # A body wrapper that emits chunked responses
     class Body
       TERM = "\r\n"
-      TAIL = "0#{TERM}#{TERM}"
+      TAIL = "0#{TERM}"
 
       include Rack::Utils
 
@@ -18,7 +18,7 @@ module Rack
         @body = body
       end
 
-      def each
+      def each(&block)
         term = TERM
         @body.each do |chunk|
           size = chunk.bytesize
@@ -28,10 +28,27 @@ module Rack
           yield [size.to_s(16), term, chunk, term].join
         end
         yield TAIL
+        insert_trailers(&block)
+        yield TERM
       end
 
       def close
         @body.close if @body.respond_to?(:close)
+      end
+
+      private
+
+      def insert_trailers(&block)
+      end
+    end
+
+    class TrailerBody < Body
+      private
+
+      def insert_trailers(&block)
+        @body.trailers.each_pair do |k, v|
+          yield "#{k}: #{v}\r\n"
+        end
       end
     end
 
@@ -43,7 +60,7 @@ module Rack
     # a version (nor response headers)
     def chunkable_version?(ver)
       case ver
-      when "HTTP/1.0", nil, "HTTP/0.9"
+      when 'HTTP/1.0', nil, 'HTTP/0.9'
         false
       else
         true
@@ -54,15 +71,19 @@ module Rack
       status, headers, body = @app.call(env)
       headers = HeaderHash.new(headers)
 
-      if ! chunkable_version?(env[HTTP_VERSION]) ||
-         STATUS_WITH_NO_ENTITY_BODY.include?(status) ||
+      if ! chunkable_version?(env[SERVER_PROTOCOL]) ||
+         STATUS_WITH_NO_ENTITY_BODY.key?(status.to_i) ||
          headers[CONTENT_LENGTH] ||
          headers[TRANSFER_ENCODING]
         [status, headers, body]
       else
         headers.delete(CONTENT_LENGTH)
         headers[TRANSFER_ENCODING] = 'chunked'
-        [status, headers, Body.new(body)]
+        if headers['Trailer']
+          [status, headers, TrailerBody.new(body)]
+        else
+          [status, headers, Body.new(body)]
+        end
       end
     end
   end

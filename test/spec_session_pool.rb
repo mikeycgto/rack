@@ -1,12 +1,10 @@
-require 'minitest/autorun'
-require 'thread'
-require 'rack/lint'
-require 'rack/mock'
-require 'rack/session/pool'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Session::Pool do
   session_key = Rack::Session::Pool::DEFAULT_OPTIONS[:key]
-  session_match = /#{session_key}=[0-9a-fA-F]+;/
+  session_match = /#{session_key}=([0-9a-fA-F]+);/
 
   incrementor = lambda do |env|
     env["rack.session"]["counter"] ||= 0
@@ -14,7 +12,7 @@ describe Rack::Session::Pool do
     Rack::Response.new(env["rack.session"].inspect).to_a
   end
 
-  session_id = Rack::Lint.new(lambda do |env|
+  get_session_id = Rack::Lint.new(lambda do |env|
     Rack::Response.new(env["rack.session"].inspect).to_a
   end)
 
@@ -56,7 +54,7 @@ describe Rack::Session::Pool do
       body.must_equal '{"counter"=>3}'
   end
 
-  it "survives nonexistant cookies" do
+  it "survives nonexistent cookies" do
     pool = Rack::Session::Pool.new(incrementor)
     res = Rack::MockRequest.new(pool).
       get("/", "HTTP_COOKIE" => "#{session_key}=blarghfasel")
@@ -143,6 +141,43 @@ describe Rack::Session::Pool do
     pool.pool.size.must_equal 1
   end
 
+  it "can read the session with the legacy id" do
+    pool = Rack::Session::Pool.new(incrementor)
+    req = Rack::MockRequest.new(pool)
+
+    res0 = req.get("/")
+    cookie = res0["Set-Cookie"]
+    session_id = Rack::Session::SessionId.new cookie[session_match, 1]
+    ses0 = pool.pool[session_id.private_id]
+    pool.pool[session_id.public_id] = ses0
+    pool.pool.delete(session_id.private_id)
+
+    res1 = req.get("/", "HTTP_COOKIE" => cookie)
+    res1["Set-Cookie"].must_be_nil
+    res1.body.must_equal '{"counter"=>2}'
+    pool.pool[session_id.private_id].wont_be_nil
+  end
+
+  it "drops the session in the legacy id as well" do
+    pool = Rack::Session::Pool.new(incrementor)
+    req = Rack::MockRequest.new(pool)
+    drop = Rack::Utils::Context.new(pool, drop_session)
+    dreq = Rack::MockRequest.new(drop)
+
+    res0 = req.get("/")
+    cookie = res0["Set-Cookie"]
+    session_id = Rack::Session::SessionId.new cookie[session_match, 1]
+    ses0 = pool.pool[session_id.private_id]
+    pool.pool[session_id.public_id] = ses0
+    pool.pool.delete(session_id.private_id)
+
+    res2 = dreq.get("/", "HTTP_COOKIE" => cookie)
+    res2["Set-Cookie"].must_be_nil
+    res2.body.must_equal '{"counter"=>2}'
+    pool.pool[session_id.private_id].must_be_nil
+    pool.pool[session_id.public_id].must_be_nil
+  end
+
   # anyone know how to do this better?
   it "should merge sessions when multithreaded" do
     unless $DEBUG
@@ -157,18 +192,18 @@ describe Rack::Session::Pool do
     res = req.get('/')
     res.body.must_equal '{"counter"=>1}'
     cookie = res["Set-Cookie"]
-    sess_id = cookie[/#{pool.key}=([^,;]+)/,1]
+    sess_id = cookie[/#{pool.key}=([^,;]+)/, 1]
 
     delta_incrementor = lambda do |env|
       # emulate disconjoinment of threading
       env['rack.session'] = env['rack.session'].dup
       Thread.stop
-      env['rack.session'][(Time.now.usec*rand).to_i] = true
+      env['rack.session'][(Time.now.usec * rand).to_i] = true
       incrementor.call(env)
     end
     tses = Rack::Utils::Context.new pool, delta_incrementor
     treq = Rack::MockRequest.new(tses)
-    tnum = rand(7).to_i+5
+    tnum = rand(7).to_i + 5
     r = Array.new(tnum) do
       Thread.new(treq) do |run|
         run.get('/', "HTTP_COOKIE" => cookie, 'rack.multithread' => true)
@@ -180,7 +215,7 @@ describe Rack::Session::Pool do
     end
 
     session = pool.pool[sess_id]
-    session.size.must_equal tnum+1 # counter
+    session.size.must_equal tnum + 1 # counter
     session['counter'].must_equal 2 # meeeh
   end
 
@@ -191,19 +226,19 @@ describe Rack::Session::Pool do
   end
 
   it "does not return a cookie if cookie was not written (only read)" do
-    app = Rack::Session::Pool.new(session_id)
+    app = Rack::Session::Pool.new(get_session_id)
     res = Rack::MockRequest.new(app).get("/")
     res["Set-Cookie"].must_be_nil
   end
 
   it "returns even if not read/written if :expire_after is set" do
-    app = Rack::Session::Pool.new(nothing, :expire_after => 3600)
-    res = Rack::MockRequest.new(app).get("/", 'rack.session' => {'not' => 'empty'})
+    app = Rack::Session::Pool.new(nothing, expire_after: 3600)
+    res = Rack::MockRequest.new(app).get("/", 'rack.session' => { 'not' => 'empty' })
     res["Set-Cookie"].wont_be :nil?
   end
 
   it "returns no cookie if no data was written and no session was created previously, even if :expire_after is set" do
-    app = Rack::Session::Pool.new(nothing, :expire_after => 3600)
+    app = Rack::Session::Pool.new(nothing, expire_after: 3600)
     res = Rack::MockRequest.new(app).get("/")
     res["Set-Cookie"].must_be_nil
   end

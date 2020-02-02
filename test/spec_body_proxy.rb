@@ -1,6 +1,6 @@
-require 'minitest/autorun'
-require 'rack/body_proxy'
-require 'stringio'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::BodyProxy do
   it 'call each on the wrapped body' do
@@ -40,7 +40,7 @@ describe Rack::BodyProxy do
     called = false
 
     begin
-      proxy  = Rack::BodyProxy.new(object) { called = true }
+      proxy = Rack::BodyProxy.new(object) { called = true }
       called.must_equal false
       proxy.close
     rescue RuntimeError => e
@@ -56,13 +56,27 @@ describe Rack::BodyProxy do
     proxy.respond_to?(:foo, false).must_equal false
   end
 
+  it 'allows #method to work with delegated methods' do
+    body  = Object.new
+    def body.banana; :pear end
+    proxy = Rack::BodyProxy.new(body) { }
+    proxy.method(:banana).call.must_equal :pear
+  end
+
+  it 'allows calling delegated methods with keywords' do
+    body  = Object.new
+    def body.banana(foo: nil); foo end
+    proxy = Rack::BodyProxy.new(body) { }
+    proxy.banana(foo: 1).must_equal 1
+  end
+
   it 'not respond to :to_ary' do
     body = Object.new.tap { |o| def o.to_ary() end }
     body.respond_to?(:to_ary).must_equal true
 
     proxy = Rack::BodyProxy.new(body) { }
-    proxy.respond_to?(:to_ary).must_equal false
-    proxy.respond_to?("to_ary").must_equal false
+    x = [proxy]
+    assert_equal x, x.flatten
   end
 
   it 'not close more than one time' do
@@ -77,9 +91,5 @@ describe Rack::BodyProxy do
     proxy = Rack::BodyProxy.new([]) { closed = proxy.closed? }
     proxy.close
     closed.must_equal true
-  end
-
-  it 'provide an #each method' do
-    Rack::BodyProxy.method_defined?(:each).must_equal true
   end
 end

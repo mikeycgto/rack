@@ -1,7 +1,6 @@
-# -*- encoding: utf-8 -*-
-require 'minitest/autorun'
-require 'rack/utils'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 require 'timeout'
 
 describe Rack::Utils do
@@ -72,7 +71,7 @@ describe Rack::Utils do
   end
 
   it "escape path spaces with %20" do
-    Rack::Utils.escape_path("foo bar").must_equal  "foo%20bar"
+    Rack::Utils.escape_path("foo bar").must_equal "foo%20bar"
   end
 
   it "unescape correctly" do
@@ -103,6 +102,12 @@ describe Rack::Utils do
     Rack::Utils.parse_query(",key,", ";,").must_equal "key" => nil
     Rack::Utils.parse_query(";foo=bar,;", ";,").must_equal "foo" => "bar"
     Rack::Utils.parse_query(",foo=bar;,", ";,").must_equal "foo" => "bar"
+  end
+
+  it "parse query strings correctly using arrays" do
+    Rack::Utils.parse_query("a[]=1").must_equal "a[]" => "1"
+    Rack::Utils.parse_query("a[]=1&a[]=2").must_equal "a[]" => ["1", "2"]
+    Rack::Utils.parse_query("a[]=1&a[]=2&a[]=3").must_equal "a[]" => ["1", "2", "3"]
   end
 
   it "not create infinite loops with cycle structures" do
@@ -181,38 +186,38 @@ describe Rack::Utils do
       must_equal "foo" => ["bar"], "baz" => ["1", "2", "3"]
 
     Rack::Utils.parse_nested_query("x[y][z]=1").
-      must_equal "x" => {"y" => {"z" => "1"}}
+      must_equal "x" => { "y" => { "z" => "1" } }
     Rack::Utils.parse_nested_query("x[y][z][]=1").
-      must_equal "x" => {"y" => {"z" => ["1"]}}
+      must_equal "x" => { "y" => { "z" => ["1"] } }
     Rack::Utils.parse_nested_query("x[y][z]=1&x[y][z]=2").
-      must_equal "x" => {"y" => {"z" => "2"}}
+      must_equal "x" => { "y" => { "z" => "2" } }
     Rack::Utils.parse_nested_query("x[y][z][]=1&x[y][z][]=2").
-      must_equal "x" => {"y" => {"z" => ["1", "2"]}}
+      must_equal "x" => { "y" => { "z" => ["1", "2"] } }
 
     Rack::Utils.parse_nested_query("x[y][][z]=1").
-      must_equal "x" => {"y" => [{"z" => "1"}]}
+      must_equal "x" => { "y" => [{ "z" => "1" }] }
     Rack::Utils.parse_nested_query("x[y][][z][]=1").
-      must_equal "x" => {"y" => [{"z" => ["1"]}]}
+      must_equal "x" => { "y" => [{ "z" => ["1"] }] }
     Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][w]=2").
-      must_equal "x" => {"y" => [{"z" => "1", "w" => "2"}]}
+      must_equal "x" => { "y" => [{ "z" => "1", "w" => "2" }] }
 
     Rack::Utils.parse_nested_query("x[y][][v][w]=1").
-      must_equal "x" => {"y" => [{"v" => {"w" => "1"}}]}
+      must_equal "x" => { "y" => [{ "v" => { "w" => "1" } }] }
     Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][v][w]=2").
-      must_equal "x" => {"y" => [{"z" => "1", "v" => {"w" => "2"}}]}
+      must_equal "x" => { "y" => [{ "z" => "1", "v" => { "w" => "2" } }] }
 
     Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][z]=2").
-      must_equal "x" => {"y" => [{"z" => "1"}, {"z" => "2"}]}
+      must_equal "x" => { "y" => [{ "z" => "1" }, { "z" => "2" }] }
     Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][w]=a&x[y][][z]=2&x[y][][w]=3").
-      must_equal "x" => {"y" => [{"z" => "1", "w" => "a"}, {"z" => "2", "w" => "3"}]}
+      must_equal "x" => { "y" => [{ "z" => "1", "w" => "a" }, { "z" => "2", "w" => "3" }] }
 
     Rack::Utils.parse_nested_query("x[][y]=1&x[][z][w]=a&x[][y]=2&x[][z][w]=b").
-      must_equal "x" => [{"y" => "1", "z" => {"w" => "a"}}, {"y" => "2", "z" => {"w" => "b"}}]
+      must_equal "x" => [{ "y" => "1", "z" => { "w" => "a" } }, { "y" => "2", "z" => { "w" => "b" } }]
     Rack::Utils.parse_nested_query("x[][z][w]=a&x[][y]=1&x[][z][w]=b&x[][y]=2").
-      must_equal "x" => [{"y" => "1", "z" => {"w" => "a"}}, {"y" => "2", "z" => {"w" => "b"}}]
+      must_equal "x" => [{ "y" => "1", "z" => { "w" => "a" } }, { "y" => "2", "z" => { "w" => "b" } }]
 
     Rack::Utils.parse_nested_query("data[books][][data][page]=1&data[books][][data][page]=2").
-      must_equal "data" => { "books" => [{ "data" => { "page" => "1"}}, { "data" => { "page" => "2"}}] }
+      must_equal "data" => { "books" => [{ "data" => { "page" => "1" } }, { "data" => { "page" => "2" } }] }
 
     lambda { Rack::Utils.parse_nested_query("x[y]=1&x[y]z=2") }.
       must_raise(Rack::Utils::ParameterTypeError).
@@ -233,13 +238,13 @@ describe Rack::Utils do
 
   it "only moves to a new array when the full key has been seen" do
     Rack::Utils.parse_nested_query("x[][y][][z]=1&x[][y][][w]=2").
-      must_equal "x" => [{"y" => [{"z" => "1", "w" => "2"}]}]
+      must_equal "x" => [{ "y" => [{ "z" => "1", "w" => "2" }] }]
 
     Rack::Utils.parse_nested_query(
       "x[][id]=1&x[][y][a]=5&x[][y][b]=7&x[][z][id]=3&x[][z][w]=0&x[][id]=2&x[][y][a]=6&x[][y][b]=8&x[][z][id]=4&x[][z][w]=0"
     ).must_equal "x" => [
-        {"id" => "1", "y" => {"a" => "5", "b" => "7"}, "z" => {"id" => "3", "w" => "0"}},
-        {"id" => "2", "y" => {"a" => "6", "b" => "8"}, "z" => {"id" => "4", "w" => "0"}},
+        { "id" => "1", "y" => { "a" => "5", "b" => "7" }, "z" => { "id" => "3", "w" => "0" } },
+        { "id" => "2", "y" => { "a" => "6", "b" => "8" }, "z" => { "id" => "4", "w" => "0" } },
       ]
   end
 
@@ -249,12 +254,16 @@ describe Rack::Utils do
       param_parser_class = Class.new(Rack::QueryParser::Params) do
         def initialize(*)
           super
-          @params = Hash.new{|h,k| h[k.to_s] if k.is_a?(Symbol)}
+          @params = Hash.new{|h, k| h[k.to_s] if k.is_a?(Symbol)}
         end
       end
       Rack::Utils.default_query_parser = Rack::QueryParser.new(param_parser_class, 65536, 100)
-      Rack::Utils.parse_query(",foo=bar;,", ";,")[:foo].must_equal "bar"
-      Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][w]=2")[:x][:y][0][:z].must_equal "1"
+      h1 = Rack::Utils.parse_query(",foo=bar;,", ";,")
+      h1[:foo].must_equal "bar"
+      h2 = Rack::Utils.parse_nested_query("x[y][][z]=1&x[y][][w]=2")
+      h2[:x][:y][0][:z].must_equal "1"
+      h3 = Rack::Utils.parse_nested_query("")
+      h3.merge(h1)[:foo].must_equal "bar"
     ensure
       Rack::Utils.default_query_parser = default_parser
     end
@@ -320,7 +329,7 @@ describe Rack::Utils do
       must_equal 'x[y][][z]=1&x[y][][z]=2'
     Rack::Utils.build_nested_query('x' => { 'y' => [{ 'z' => '1', 'w' => 'a' }, { 'z' => '2', 'w' => '3' }] }).
       must_equal 'x[y][][z]=1&x[y][][w]=a&x[y][][z]=2&x[y][][w]=3'
-    Rack::Utils.build_nested_query({"foo" => ["1", ["2"]]}).
+    Rack::Utils.build_nested_query({ "foo" => ["1", ["2"]] }).
       must_equal 'foo[]=1&foo[][]=2'
 
     lambda { Rack::Utils.build_nested_query("foo=bar") }.
@@ -329,24 +338,24 @@ describe Rack::Utils do
   end
 
   it 'performs the inverse function of #parse_nested_query' do
-    [{"foo" => nil, "bar" => ""},
-      {"foo" => "bar", "baz" => ""},
-      {"foo" => ["1", "2"]},
-      {"foo" => "bar", "baz" => ["1", "2", "3"]},
-      {"foo" => ["bar"], "baz" => ["1", "2", "3"]},
-      {"foo" => ["1", "2"]},
-      {"foo" => "bar", "baz" => ["1", "2", "3"]},
-      {"x" => {"y" => {"z" => "1"}}},
-      {"x" => {"y" => {"z" => ["1"]}}},
-      {"x" => {"y" => {"z" => ["1", "2"]}}},
-      {"x" => {"y" => [{"z" => "1"}]}},
-      {"x" => {"y" => [{"z" => ["1"]}]}},
-      {"x" => {"y" => [{"z" => "1", "w" => "2"}]}},
-      {"x" => {"y" => [{"v" => {"w" => "1"}}]}},
-      {"x" => {"y" => [{"z" => "1", "v" => {"w" => "2"}}]}},
-      {"x" => {"y" => [{"z" => "1"}, {"z" => "2"}]}},
-      {"x" => {"y" => [{"z" => "1", "w" => "a"}, {"z" => "2", "w" => "3"}]}},
-      {"foo" => ["1", ["2"]]},
+    [{ "foo" => nil, "bar" => "" },
+      { "foo" => "bar", "baz" => "" },
+      { "foo" => ["1", "2"] },
+      { "foo" => "bar", "baz" => ["1", "2", "3"] },
+      { "foo" => ["bar"], "baz" => ["1", "2", "3"] },
+      { "foo" => ["1", "2"] },
+      { "foo" => "bar", "baz" => ["1", "2", "3"] },
+      { "x" => { "y" => { "z" => "1" } } },
+      { "x" => { "y" => { "z" => ["1"] } } },
+      { "x" => { "y" => { "z" => ["1", "2"] } } },
+      { "x" => { "y" => [{ "z" => "1" }] } },
+      { "x" => { "y" => [{ "z" => ["1"] }] } },
+      { "x" => { "y" => [{ "z" => "1", "w" => "2" }] } },
+      { "x" => { "y" => [{ "v" => { "w" => "1" } }] } },
+      { "x" => { "y" => [{ "z" => "1", "v" => { "w" => "2" } }] } },
+      { "x" => { "y" => [{ "z" => "1" }, { "z" => "2" }] } },
+      { "x" => { "y" => [{ "z" => "1", "w" => "a" }, { "z" => "2", "w" => "3" }] } },
+      { "foo" => ["1", ["2"]] },
     ].each { |params|
       qs = Rack::Utils.build_nested_query(params)
       Rack::Utils.parse_nested_query(qs).must_equal params
@@ -461,6 +470,12 @@ describe Rack::Utils do
     Rack::Utils.status_code(:ok).must_equal 200
   end
 
+  it "raise an error for an invalid symbol" do
+    assert_raises(ArgumentError, "Unrecognized status code :foobar") do
+      Rack::Utils.status_code(:foobar)
+    end
+  end
+
   it "return rfc2822 format from rfc2822 helper" do
     Rack::Utils.rfc2822(Time.at(0).gmtime).must_equal "Thu, 01 Jan 1970 00:00:00 -0000"
   end
@@ -492,19 +507,22 @@ end
 describe Rack::Utils, "cookies" do
   it "parses cookies" do
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "zoo=m")
-    Rack::Utils.parse_cookies(env).must_equal({"zoo" => "m"})
+    Rack::Utils.parse_cookies(env).must_equal({ "zoo" => "m" })
 
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=%")
-    Rack::Utils.parse_cookies(env).must_equal({"foo" => "%"})
+    Rack::Utils.parse_cookies(env).must_equal({ "foo" => "%" })
 
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar;foo=car")
-    Rack::Utils.parse_cookies(env).must_equal({"foo" => "bar"})
+    Rack::Utils.parse_cookies(env).must_equal({ "foo" => "bar" })
 
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar;quux=h&m")
-    Rack::Utils.parse_cookies(env).must_equal({"foo" => "bar", "quux" => "h&m"})
+    Rack::Utils.parse_cookies(env).must_equal({ "foo" => "bar", "quux" => "h&m" })
+
+    env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar; quux=h&m")
+    Rack::Utils.parse_cookies(env).must_equal({ "foo" => "bar", "quux" => "h&m" })
 
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar").freeze
-    Rack::Utils.parse_cookies(env).must_equal({"foo" => "bar"})
+    Rack::Utils.parse_cookies(env).must_equal({ "foo" => "bar" })
   end
 
   it "adds new cookies to nil header" do
@@ -534,52 +552,76 @@ describe Rack::Utils, "cookies" do
       Rack::Utils.add_cookie_to_header(Object.new, 'name', 'value')
     }.must_raise ArgumentError
   end
+
+  it "sets and deletes cookies in header hash" do
+    header = { 'Set-Cookie' => '' }
+    Rack::Utils.set_cookie_header!(header, 'name', 'value').must_be_nil
+    header['Set-Cookie'].must_equal 'name=value'
+    Rack::Utils.set_cookie_header!(header, 'name2', 'value2').must_be_nil
+    header['Set-Cookie'].must_equal "name=value\nname2=value2"
+    Rack::Utils.set_cookie_header!(header, 'name2', 'value3').must_be_nil
+    header['Set-Cookie'].must_equal "name=value\nname2=value2\nname2=value3"
+
+    Rack::Utils.delete_cookie_header!(header, 'name2').must_be_nil
+    header['Set-Cookie'].must_equal "name=value\nname2=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+    Rack::Utils.delete_cookie_header!(header, 'name').must_be_nil
+    header['Set-Cookie'].must_equal "name2=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT\nname=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+
+    header = { 'Set-Cookie' => nil }
+    Rack::Utils.delete_cookie_header!(header, 'name').must_be_nil
+    header['Set-Cookie'].must_equal "name=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+
+    header = { 'Set-Cookie' => [] }
+    Rack::Utils.delete_cookie_header!(header, 'name').must_be_nil
+    header['Set-Cookie'].must_equal "name=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+  end
+
 end
 
 describe Rack::Utils, "byte_range" do
   it "ignore missing or syntactically invalid byte ranges" do
-    Rack::Utils.byte_ranges({},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "foobar"},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "furlongs=123-456"},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes="},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-"},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=123,456"},500).must_be_nil
+    Rack::Utils.byte_ranges({}, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "foobar" }, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "furlongs=123-456" }, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=" }, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-" }, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=123,456" }, 500).must_be_nil
     # A range of non-positive length is syntactically invalid and ignored:
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=456-123"},500).must_be_nil
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=456-455"},500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=456-123" }, 500).must_be_nil
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=456-455" }, 500).must_be_nil
   end
 
   it "parse simple byte ranges" do
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=123-456"},500).must_equal [(123..456)]
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=123-"},500).must_equal [(123..499)]
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-100"},500).must_equal [(400..499)]
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=0-0"},500).must_equal [(0..0)]
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=499-499"},500).must_equal [(499..499)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=123-456" }, 500).must_equal [(123..456)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=123-" }, 500).must_equal [(123..499)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-100" }, 500).must_equal [(400..499)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=0-0" }, 500).must_equal [(0..0)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=499-499" }, 500).must_equal [(499..499)]
   end
 
   it "parse several byte ranges" do
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=500-600,601-999"},1000).must_equal [(500..600),(601..999)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=500-600,601-999" }, 1000).must_equal [(500..600), (601..999)]
   end
 
   it "truncate byte ranges" do
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=123-999"},500).must_equal [(123..499)]
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=600-999"},500).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-999"},500).must_equal [(0..499)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=123-999" }, 500).must_equal [(123..499)]
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=600-999" }, 500).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-999" }, 500).must_equal [(0..499)]
   end
 
   it "ignore unsatisfiable byte ranges" do
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=500-501"},500).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=500-"},500).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=999-"},500).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-0"},500).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=500-501" }, 500).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=500-" }, 500).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=999-" }, 500).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-0" }, 500).must_equal []
   end
 
   it "handle byte ranges of empty files" do
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=123-456"},0).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=0-"},0).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-100"},0).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=0-0"},0).must_equal []
-    Rack::Utils.byte_ranges({"HTTP_RANGE" => "bytes=-0"},0).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=123-456" }, 0).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=0-" }, 0).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-100" }, 0).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=0-0" }, 0).must_equal []
+    Rack::Utils.byte_ranges({ "HTTP_RANGE" => "bytes=-0" }, 0).must_equal []
   end
 end
 
@@ -612,7 +654,7 @@ describe Rack::Utils::HeaderHash do
   it "merge case-insensitively" do
     h = Rack::Utils::HeaderHash.new("ETag" => 'HELLO', "content-length" => '123')
     merged = h.merge("Etag" => 'WORLD', 'Content-Length' => '321', "Foo" => 'BAR')
-    merged.must_equal "Etag"=>'WORLD', "Content-Length"=>'321', "Foo"=>'BAR'
+    merged.must_equal "Etag" => 'WORLD', "Content-Length" => '321', "Foo" => 'BAR'
   end
 
   it "overwrite case insensitively and assume the new key's case" do
@@ -635,7 +677,7 @@ describe Rack::Utils::HeaderHash do
 
   it "replace hashes correctly" do
     h = Rack::Utils::HeaderHash.new("Foo-Bar" => "baz")
-    j = {"foo" => "bar"}
+    j = { "foo" => "bar" }
     h.replace(j)
     h["foo"].must_equal "bar"
   end
@@ -659,21 +701,21 @@ describe Rack::Utils::HeaderHash do
     h.delete("Foo").must_equal "bar"
   end
 
-  it "return nil when #delete is called on a non-existant key" do
+  it "return nil when #delete is called on a non-existent key" do
     h = Rack::Utils::HeaderHash.new("foo" => "bar")
     h.delete("Hello").must_be_nil
   end
 
-  it "avoid unnecessary object creation if possible" do
+  it "dups given HeaderHash" do
     a = Rack::Utils::HeaderHash.new("foo" => "bar")
     b = Rack::Utils::HeaderHash.new(a)
-    b.object_id.must_equal a.object_id
+    b.object_id.wont_equal a.object_id
     b.must_equal a
   end
 
   it "convert Array values to Strings when responding to #each" do
     h = Rack::Utils::HeaderHash.new("foo" => ["bar", "baz"])
-    h.each do |k,v|
+    h.each do |k, v|
       k.must_equal "foo"
       v.must_equal "bar\nbaz"
     end
@@ -690,14 +732,14 @@ end
 describe Rack::Utils::Context do
   class ContextTest
     attr_reader :app
-    def initialize app; @app=app; end
+    def initialize app; @app = app; end
     def call env; context env; end
-    def context env, app=@app; app.call(env); end
+    def context env, app = @app; app.call(env); end
   end
-  test_target1 = proc{|e| e.to_s+' world' }
-  test_target2 = proc{|e| e.to_i+2 }
+  test_target1 = proc{|e| e.to_s + ' world' }
+  test_target2 = proc{|e| e.to_i + 2 }
   test_target3 = proc{|e| nil }
-  test_target4 = proc{|e| [200,{'Content-Type'=>'text/plain', 'Content-Length'=>'0'},['']] }
+  test_target4 = proc{|e| [200, { 'Content-Type' => 'text/plain', 'Content-Length' => '0' }, ['']] }
   test_app = ContextTest.new test_target4
 
   it "set context correctly" do
@@ -732,6 +774,8 @@ describe Rack::Utils::Context do
     r2 = c2.call(2)
     r2.must_equal 4
     r3 = c3.call(:misc_symbol)
+    r3.must_be_nil
+    r3 = c2.context(:misc_symbol, test_target3)
     r3.must_be_nil
     r4 = Rack::MockRequest.new(a4).get('/')
     r4.status.must_equal 200

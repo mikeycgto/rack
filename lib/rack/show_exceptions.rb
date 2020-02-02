@@ -1,7 +1,7 @@
+# frozen_string_literal: true
+
 require 'ostruct'
 require 'erb'
-require 'rack/request'
-require 'rack/utils'
 
 module Rack
   # Rack::ShowExceptions catches all exceptions raised from the app it
@@ -46,7 +46,7 @@ module Rack
     end
 
     def prefers_plaintext?(env)
-      !accepts_html(env)
+      !accepts_html?(env)
     end
 
     def accepts_html?(env)
@@ -55,7 +55,7 @@ module Rack
     private :accepts_html?
 
     def dump_exception(exception)
-      string = "#{exception.class}: #{exception.message}\n"
+      string = "#{exception.class}: #{exception.message}\n".dup
       string << exception.backtrace.map { |l| "\t#{l}" }.join("\n")
       string
     end
@@ -77,13 +77,13 @@ module Rack
           frame.function = $4
 
           begin
-            lineno = frame.lineno-1
+            lineno = frame.lineno - 1
             lines = ::File.readlines(frame.filename)
-            frame.pre_context_lineno = [lineno-CONTEXT, 0].max
+            frame.pre_context_lineno = [lineno - CONTEXT, 0].max
             frame.pre_context = lines[frame.pre_context_lineno...lineno]
             frame.context_line = lines[lineno].chomp
-            frame.post_context_lineno = [lineno+CONTEXT, lines.size].min
-            frame.post_context = lines[lineno+1..frame.post_context_lineno]
+            frame.post_context_lineno = [lineno + CONTEXT, lines.size].min
+            frame.post_context = lines[lineno + 1..frame.post_context_lineno]
           rescue
           end
 
@@ -93,7 +93,11 @@ module Rack
         end
       }.compact
 
-      TEMPLATE.result(binding)
+      template.result(binding)
+    end
+
+    def template
+      TEMPLATE
     end
 
     def h(obj)                  # :nodoc:
@@ -107,8 +111,8 @@ module Rack
 
     # :stopdoc:
 
-    # adapted from Django <djangoproject.com>
-    # Copyright (c) 2005, the Lawrence Journal-World
+    # adapted from Django <www.djangoproject.com>
+    # Copyright (c) Django Software Foundation and individual contributors.
     # Used under the modified BSD license:
     # http://www.xfree86.org/3.3.6/COPYRIGHT2.html#5
     TEMPLATE = ERB.new(<<-'HTML'.gsub(/^      /, ''))
@@ -307,7 +311,7 @@ module Rack
         <% end %>
 
         <h3 id="post-info">POST</h3>
-        <% if req.POST and not req.POST.empty? %>
+        <% if ((req.POST and not req.POST.empty?) rescue (no_post_data = "Invalid POST data"; nil)) %>
           <table class="req">
             <thead>
               <tr>
@@ -325,7 +329,7 @@ module Rack
             </tbody>
           </table>
         <% else %>
-          <p>No POST data.</p>
+          <p><%= no_post_data || "No POST data" %>.</p>
         <% end %>
 
 
@@ -363,7 +367,7 @@ module Rack
                 <% env.sort_by { |k, v| k.to_s }.each { |key, val| %>
                 <tr>
                   <td><%=h key %></td>
-                  <td class="code"><div><%=h val %></div></td>
+                  <td class="code"><div><%=h val.inspect %></div></td>
                 </tr>
                 <% } %>
             </tbody>

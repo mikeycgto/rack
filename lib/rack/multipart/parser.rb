@@ -1,15 +1,21 @@
-require 'rack/utils'
+# frozen_string_literal: true
+
+require 'strscan'
 
 module Rack
   module Multipart
     class MultipartPartLimitError < Errno::EMFILE; end
 
     class Parser
-      BUFSIZE = 16384
+      (require_relative '../core_ext/regexp'; using ::Rack::RegexpExtensions) if RUBY_VERSION < '2.4'
+
+      BUFSIZE = 1_048_576
       TEXT_PLAIN = "text/plain"
       TEMPFILE_FACTORY = lambda { |filename, content_type|
-        Tempfile.new(["RackMultipart", ::File.extname(filename.gsub("\0".freeze, '%00'.freeze))])
+        Tempfile.new(["RackMultipart", ::File.extname(filename.gsub("\0", '%00'))])
       }
+
+      BOUNDARY_REGEX = /\A([^\n]*(?:\n|\Z))/
 
       class BoundedIO # :nodoc:
         def initialize(io, content_length)
@@ -18,15 +24,15 @@ module Rack
           @cursor = 0
         end
 
-        def read(size)
+        def read(size, outbuf = nil)
           return if @cursor >= @content_length
 
           left = @content_length - @cursor
 
           str = if left < size
-                  @io.read left
+                  @io.read left, outbuf
                 else
-                  @io.read size
+                  @io.read size, outbuf
                 end
 
           if str
@@ -38,8 +44,6 @@ module Rack
 
           str
         end
-
-        def eof?; @content_length == @cursor; end
 
         def rewind
           @io.rewind
@@ -63,13 +67,14 @@ module Rack
         return EMPTY unless boundary
 
         io = BoundedIO.new(io, content_length) if content_length
+        outbuf = String.new
 
         parser = new(boundary, tmpfile, bufsize, qp)
-        parser.on_read io.read(bufsize), io.eof?
+        parser.on_read io.read(bufsize, outbuf)
 
         loop do
           break if parser.state == :DONE
-          parser.on_read io.read(bufsize), io.eof?
+          parser.on_read io.read(bufsize, outbuf)
         end
 
         io.rewind
@@ -92,14 +97,8 @@ module Rack
               # those which give the lone filename.
               fn = filename.split(/[\/\\]/).last
 
-              data = {:filename => fn, :type => content_type,
-                      :name => name, :tempfile => body, :head => head}
-            elsif !filename && content_type && body.is_a?(IO)
-              body.rewind
-
-              # Generic multipart cases, not coming from a form
-              data = {:type => content_type,
-                      :name => name, :tempfile => body, :head => head}
+              data = { filename: fn, type: content_type,
+                      name: name, tempfile: body, head: head }
             end
 
             yield data
@@ -140,6 +139,7 @@ module Rack
           end
 
           @mime_parts[mime_index] = klass.new(body, head, filename, content_type, name)
+
           check_open_files
         end
 
@@ -165,25 +165,26 @@ module Rack
       attr_reader :state
 
       def initialize(boundary, tempfile, bufsize, query_parser)
-        @buf            = String.new
-
         @query_parser   = query_parser
         @params         = query_parser.make_params
         @boundary       = "--#{boundary}"
-        @boundary_size  = @boundary.bytesize + EOL.size
         @bufsize        = bufsize
 
-        @rx = /(?:#{EOL})?#{Regexp.quote(@boundary)}(#{EOL}|--)/n
         @full_boundary = @boundary
         @end_boundary = @boundary + '--'
         @state = :FAST_FORWARD
         @mime_index = 0
         @collector = Collector.new tempfile
+
+        @sbuf = StringScanner.new("".dup)
+        @body_regex = /(?:#{EOL})?#{Regexp.quote(@boundary)}(?:#{EOL}|--)/m
+        @rx_max_size = EOL.size + @boundary.bytesize + [EOL.size, '--'.size].max
+        @head_regex = /(.*?#{EOL})#{EOL}/m
       end
 
-      def on_read content, eof
-        handle_empty_content!(content, eof)
-        @buf << content
+      def on_read content
+        handle_empty_content!(content)
+        @sbuf.concat content
         run_parser
       end
 
@@ -194,7 +195,6 @@ module Rack
             @query_parser.normalize_params(@params, part.name, data, @query_parser.param_depth_limit)
           end
         end
-
         MultipartInfo.new @params.to_params_hash, @collector.find_all(&:file?).map(&:body)
       end
 
@@ -221,7 +221,7 @@ module Rack
         if consume_boundary
           @state = :MIME_HEAD
         else
-          raise EOFError, "bad content body" if @buf.bytesize >= @bufsize
+          raise EOFError, "bad content body" if @sbuf.rest_size >= @bufsize
           :want_read
         end
       end
@@ -229,19 +229,16 @@ module Rack
       def handle_consume_token
         tok = consume_boundary
         # break if we're at the end of a buffer, but not if it is the end of a field
-        if tok == :END_BOUNDARY || (@buf.empty? && tok != :BOUNDARY)
-          @state = :DONE
+        @state = if tok == :END_BOUNDARY || (@sbuf.eos? && tok != :BOUNDARY)
+          :DONE
         else
-          @state = :MIME_HEAD
+          :MIME_HEAD
         end
       end
 
       def handle_mime_head
-        if @buf.index(EOL + EOL)
-          i = @buf.index(EOL+EOL)
-          head = @buf.slice!(0, i+2) # First \r\n
-          @buf.slice!(0, 2)          # Second \r\n
-
+        if @sbuf.scan_until(@head_regex)
+          head = @sbuf[1]
           content_type = head[MULTIPART_CONTENT_TYPE, 1]
           if name = head[MULTIPART_CONTENT_DISPOSITION, 1]
             name = Rack::Auth::Digest::Params::dequote(name)
@@ -252,7 +249,7 @@ module Rack
           filename = get_filename(head)
 
           if name.nil? || name.empty?
-            name = filename || "#{content_type || TEXT_PLAIN}[]"
+            name = filename || "#{content_type || TEXT_PLAIN}[]".dup
           end
 
           @collector.on_mime_head @mime_index, head, filename, content_type, name
@@ -263,31 +260,33 @@ module Rack
       end
 
       def handle_mime_body
-        if @buf =~ rx
-          # Save the rest.
-          if i = @buf.index(rx)
-            @collector.on_mime_body @mime_index, @buf.slice!(0, i)
-            @buf.slice!(0, 2) # Remove \r\n after the content
-          end
+        if (body_with_boundary = @sbuf.check_until(@body_regex)) # check but do not advance the pointer yet
+          body = body_with_boundary.sub(/#{@body_regex}\z/m, '') # remove the boundary from the string
+          @collector.on_mime_body @mime_index, body
+          @sbuf.pos += body.length + 2 # skip \r\n after the content
           @state = :CONSUME_TOKEN
           @mime_index += 1
         else
+          # Save what we have so far
+          if @rx_max_size < @sbuf.rest_size
+            delta = @sbuf.rest_size - @rx_max_size
+            @collector.on_mime_body @mime_index, @sbuf.peek(delta)
+            @sbuf.pos += delta
+            @sbuf.string = @sbuf.rest
+          end
           :want_read
         end
       end
 
       def full_boundary; @full_boundary; end
 
-      def rx; @rx; end
-
       def consume_boundary
-        while @buf.gsub!(/\A([^\n]*(?:\n|\Z))/, '')
-          read_buffer = $1
+        while read_buffer = @sbuf.scan_until(BOUNDARY_REGEX)
           case read_buffer.strip
           when full_boundary then return :BOUNDARY
           when @end_boundary then return :END_BOUNDARY
           end
-          return if @buf.empty?
+          return if @sbuf.eos?
         end
       end
 
@@ -308,8 +307,8 @@ module Rack
 
         return unless filename
 
-        if filename.scan(/%.?.?/).all? { |s| s =~ /%[0-9a-fA-F]{2}/ }
-          filename = Utils.unescape(filename)
+        if filename.scan(/%.?.?/).all? { |s| /%[0-9a-fA-F]{2}/.match?(s) }
+          filename = Utils.unescape_path(filename)
         end
 
         filename.scrub!
@@ -325,7 +324,7 @@ module Rack
         filename
       end
 
-      CHARSET   = "charset"
+      CHARSET = "charset"
 
       def tag_multipart_encoding(filename, content_type, name, body)
         name = name.to_s
@@ -340,12 +339,12 @@ module Rack
           type_subtype = list.first
           type_subtype.strip!
           if TEXT_PLAIN == type_subtype
-            rest         = list.drop 1
+            rest = list.drop 1
             rest.each do |param|
-              k,v = param.split('=', 2)
+              k, v = param.split('=', 2)
               k.strip!
               v.strip!
-              v = v[1..-2] if v[0] == '"' && v[-1] == '"'
+              v = v[1..-2] if v.start_with?('"') && v.end_with?('"')
               encoding = Encoding.find v if k == CHARSET
             end
           end
@@ -355,11 +354,9 @@ module Rack
         body.force_encoding(encoding)
       end
 
-
-      def handle_empty_content!(content, eof)
+      def handle_empty_content!(content)
         if content.nil? || content.empty?
-          raise EOFError if eof
-          return true
+          raise EOFError
         end
       end
     end

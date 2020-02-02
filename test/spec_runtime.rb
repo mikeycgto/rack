@@ -1,7 +1,6 @@
-require 'minitest/autorun'
-require 'rack/lint'
-require 'rack/mock'
-require 'rack/runtime'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Runtime do
   def runtime_app(app, *args)
@@ -13,25 +12,25 @@ describe Rack::Runtime do
   end
 
   it "sets X-Runtime is none is set" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, "Hello, World!"] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, "Hello, World!"] }
     response = runtime_app(app).call(request)
     response[1]['X-Runtime'].must_match(/[\d\.]+/)
   end
 
   it "doesn't set the X-Runtime if it is already set" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain', "X-Runtime" => "foobar"}, "Hello, World!"] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain', "X-Runtime" => "foobar" }, "Hello, World!"] }
     response = runtime_app(app).call(request)
     response[1]['X-Runtime'].must_equal "foobar"
   end
 
   it "allow a suffix to be set" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, "Hello, World!"] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, "Hello, World!"] }
     response = runtime_app(app, "Test").call(request)
     response[1]['X-Runtime-Test'].must_match(/[\d\.]+/)
   end
 
   it "allow multiple timers to be set" do
-    app = lambda { |env| sleep 0.1; [200, {'Content-Type' => 'text/plain'}, "Hello, World!"] }
+    app = lambda { |env| sleep 0.1; [200, { 'Content-Type' => 'text/plain' }, "Hello, World!"] }
     runtime = runtime_app(app, "App")
 
     # wrap many times to guarantee a measurable difference

@@ -1,6 +1,6 @@
-require 'minitest/autorun'
-require 'stringio'
-require 'rack/rewindable_input'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 module RewindableTest
   extend Minitest::Spec::DSL
@@ -26,14 +26,14 @@ module RewindableTest
   end
 
   it "be able to handle to read(length, buffer)" do
-    buffer = ""
+    buffer = "".dup
     result = @rio.read(1, buffer)
     result.must_equal "h"
     result.object_id.must_equal buffer.object_id
   end
 
   it "be able to handle to read(nil, buffer)" do
-    buffer = ""
+    buffer = "".dup
     result = @rio.read(nil, buffer)
     result.must_equal "hello world"
     result.object_id.must_equal buffer.object_id
@@ -77,6 +77,27 @@ module RewindableTest
     tempfile.must_be :closed?
   end
 
+  it "handle partial writes to tempfile" do
+    def @rio.filesystem_has_posix_semantics?
+      def @rewindable_io.write(buffer)
+        super(buffer[0..1])
+      end
+      super
+    end
+    @rio.read(1)
+    tempfile = @rio.instance_variable_get(:@rewindable_io)
+    @rio.close
+    tempfile.must_be :closed?
+  end
+
+  it "close the underlying tempfile upon calling #close when not using posix semantics" do
+    def @rio.filesystem_has_posix_semantics?; false end
+    @rio.read(1)
+    tempfile = @rio.instance_variable_get(:@rewindable_io)
+    @rio.close
+    tempfile.must_be :closed?
+  end
+
   it "be possible to call #close when no data has been buffered yet" do
     @rio.close.must_be_nil
   end
@@ -95,7 +116,7 @@ end
 describe Rack::RewindableInput do
   describe "given an IO object that is already rewindable" do
     def setup
-      @io = StringIO.new("hello world")
+      @io = StringIO.new("hello world".dup)
       super
     end
 
@@ -104,7 +125,7 @@ describe Rack::RewindableInput do
 
   describe "given an IO object that is not rewindable" do
     def setup
-      @io = StringIO.new("hello world")
+      @io = StringIO.new("hello world".dup)
       @io.instance_eval do
         undef :rewind
       end
@@ -116,7 +137,7 @@ describe Rack::RewindableInput do
 
   describe "given an IO object whose rewind method raises Errno::ESPIPE" do
     def setup
-      @io = StringIO.new("hello world")
+      @io = StringIO.new("hello world".dup)
       def @io.rewind
         raise Errno::ESPIPE, "You can't rewind this!"
       end

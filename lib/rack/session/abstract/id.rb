@@ -1,15 +1,42 @@
+# frozen_string_literal: true
+
 # AUTHOR: blink <blinketje@gmail.com>; blink#ruby-lang@irc.freenode.net
 # bugrep: Andreas Zehnder
 
-require 'rack'
+require_relative '../../../rack'
 require 'time'
-require 'rack/request'
-require 'rack/response'
 require 'securerandom'
+require 'digest/sha2'
 
 module Rack
 
   module Session
+
+    class SessionId
+      ID_VERSION = 2
+
+      attr_reader :public_id
+
+      def initialize(public_id)
+        @public_id = public_id
+      end
+
+      def private_id
+        "#{ID_VERSION}::#{hash_sid(public_id)}"
+      end
+
+      alias :cookie_value :public_id
+      alias :to_s :public_id
+
+      def empty?; false; end
+      def inspect; public_id.inspect; end
+
+      private
+
+      def hash_sid(sid)
+        Digest::SHA256.hexdigest(sid)
+      end
+    end
 
     module Abstract
       # SessionHash is responsible to lazily load the session from store.
@@ -57,7 +84,12 @@ module Rack
           @data[key.to_s]
         end
 
-        def fetch(key, default=Unspecified, &block)
+        def dig(key, *keys)
+          load_for_read!
+          @data.dig(key.to_s, *keys)
+        end
+
+        def fetch(key, default = Unspecified, &block)
           load_for_read!
           if default == Unspecified
             @data.fetch(key.to_s, &block)
@@ -160,8 +192,9 @@ module Rack
         end
 
         def stringify_keys(other)
+          # Use transform_keys after dropping Ruby 2.4 support
           hash = {}
-          other.each do |key, value|
+          other.to_hash.each do |key, value|
             hash[key.to_s] = value
           end
           hash
@@ -170,8 +203,8 @@ module Rack
 
       # ID sets up a basic framework for implementing an id based sessioning
       # service. Cookies sent to the client for maintaining sessions will only
-      # contain an id reference. Only #find_session and #write_session are
-      # required to be overwritten.
+      # contain an id reference. Only #find_session, #write_session and
+      # #delete_session are required to be overwritten.
       #
       # All parameters are optional.
       # * :key determines the name of the cookie, by default it is
@@ -199,22 +232,22 @@ module Rack
 
       class Persisted
         DEFAULT_OPTIONS = {
-          :key =>           RACK_SESSION,
-          :path =>          '/',
-          :domain =>        nil,
-          :expire_after =>  nil,
-          :secure =>        false,
-          :httponly =>      true,
-          :defer =>         false,
-          :renew =>         false,
-          :sidbits =>       128,
-          :cookie_only =>   true,
-          :secure_random => ::SecureRandom
+          key: RACK_SESSION,
+          path: '/',
+          domain: nil,
+          expire_after: nil,
+          secure: false,
+          httponly: true,
+          defer: false,
+          renew: false,
+          sidbits: 128,
+          cookie_only: true,
+          secure_random: ::SecureRandom
         }.freeze
 
         attr_reader :key, :default_options, :sid_secure
 
-        def initialize(app, options={})
+        def initialize(app, options = {})
           @app = app
           @default_options = self.class::DEFAULT_OPTIONS.merge(options)
           @key = @default_options.delete(:key)
@@ -226,7 +259,7 @@ module Rack
           context(env)
         end
 
-        def context(env, app=@app)
+        def context(env, app = @app)
           req = make_request env
           prepare_session(req)
           status, headers, body = app.call(req.env)
@@ -349,7 +382,7 @@ module Rack
 
           session.send(:load!) unless loaded_session?(session)
           session_id ||= session.id
-          session_data = session.to_hash.delete_if { |k,v| v.nil? }
+          session_data = session.to_hash.delete_if { |k, v| v.nil? }
 
           if not data = write_session(req, session_id, session_data, options)
             req.get_header(RACK_ERRORS).puts("Warning! #{self.class.name} failed to save session. Content dropped.")
@@ -357,13 +390,17 @@ module Rack
             req.get_header(RACK_ERRORS).puts("Deferring cookie for #{session_id}") if $VERBOSE
           else
             cookie = Hash.new
-            cookie[:value] = data
+            cookie[:value] = cookie_value(data)
             cookie[:expires] = Time.now + options[:expire_after] if options[:expire_after]
             cookie[:expires] = Time.now + options[:max_age] if options[:max_age]
             set_cookie(req, res, cookie.merge!(options))
           end
         end
         public :commit_session
+
+        def cookie_value(data)
+          data
+        end
 
         # Sets the cookie back to the client with session id. We skip the cookie
         # setting if the value didn't change (sid is the same) or expires was given.
@@ -403,6 +440,40 @@ module Rack
 
         def delete_session(req, sid, options)
           raise '#delete_session not implemented'
+        end
+      end
+
+      class PersistedSecure < Persisted
+        class SecureSessionHash < SessionHash
+          def [](key)
+            if key == "session_id"
+              load_for_read!
+              id.public_id if id
+            else
+              super
+            end
+          end
+        end
+
+        def generate_sid(*)
+          public_id = super
+
+          SessionId.new(public_id)
+        end
+
+        def extract_session_id(*)
+          public_id = super
+          public_id && SessionId.new(public_id)
+        end
+
+        private
+
+        def session_class
+          SecureSessionHash
+        end
+
+        def cookie_value(data)
+          data.cookie_value
         end
       end
 

@@ -1,6 +1,7 @@
 # -*- encoding: binary -*-
+# frozen_string_literal: true
+
 require 'tempfile'
-require 'rack/utils'
 
 module Rack
   # Class which can make any IO object rewindable, including non-rewindable ones. It does
@@ -40,7 +41,7 @@ module Rack
     end
 
     # Closes this RewindableInput object without closing the originally
-    # wrapped IO oject. Cleans up any temporary resources that this RewindableInput
+    # wrapped IO object. Cleans up any temporary resources that this RewindableInput
     # has created.
     #
     # This method may be called multiple times. It does nothing on subsequent calls.
@@ -72,7 +73,7 @@ module Rack
         @unlinked = true
       end
 
-      buffer = ""
+      buffer = "".dup
       while @io.read(1024 * 4, buffer)
         entire_buffer_written_out = false
         while !entire_buffer_written_out

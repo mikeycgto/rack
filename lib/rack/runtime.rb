@@ -1,4 +1,4 @@
-require 'rack/utils'
+# frozen_string_literal: true
 
 module Rack
   # Sets an "X-Runtime" response header, indicating the response
@@ -8,8 +8,8 @@ module Rack
   # time, or before all the other middlewares to include time for them,
   # too.
   class Runtime
-    FORMAT_STRING = "%0.6f".freeze # :nodoc:
-    HEADER_NAME = "X-Runtime".freeze # :nodoc:
+    FORMAT_STRING = "%0.6f" # :nodoc:
+    HEADER_NAME = "X-Runtime" # :nodoc:
 
     def initialize(app, name = nil)
       @app = app

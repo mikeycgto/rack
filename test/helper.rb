@@ -1,34 +1,21 @@
-require 'minitest/autorun'
+# frozen_string_literal: true
 
-module Rack
-  class TestCase < Minitest::Test
-    # Check for Lighttpd and launch it for tests if available.
-    `which lighttpd`
+if ENV.delete('COVERAGE')
+  require 'coverage'
+  require 'simplecov'
 
-    if $?.success?
-      begin
-        # Keep this first.
-        LIGHTTPD_PID = fork {
-          ENV['RACK_ENV'] = 'deployment'
-          ENV['RUBYLIB'] = [
-            ::File.expand_path('../../lib', __FILE__),
-            ENV['RUBYLIB'],
-          ].compact.join(':')
-
-          Dir.chdir(::File.expand_path("../cgi", __FILE__)) do
-            exec "lighttpd -D -f lighttpd.conf"
-          end
-        }
-      rescue NotImplementedError
-        warn "Your Ruby doesn't support Kernel#fork. Skipping Rack::Handler::CGI and ::FastCGI tests."
-      else
-        Minitest.after_run do
-          Process.kill 15, LIGHTTPD_PID
-          Process.wait LIGHTTPD_PID
-        end
-      end
-    else
-      warn "Lighttpd isn't installed. Skipping Rack::Handler::CGI and FastCGI tests. Install lighttpd to run them."
+  def SimpleCov.rack_coverage(**opts)
+    start do
+      add_filter "/test/"
+      add_filter "/lib/rack/handler"
+      add_group('Missing'){|src| src.covered_percent < 100}
+      add_group('Covered'){|src| src.covered_percent == 100}
     end
   end
+  SimpleCov.rack_coverage
 end
+
+$:.unshift(File.expand_path('../lib', __dir__))
+require_relative '../lib/rack'
+require 'minitest/global_expectations/autorun'
+require 'stringio'

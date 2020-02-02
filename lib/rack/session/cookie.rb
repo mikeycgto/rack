@@ -1,10 +1,10 @@
+# frozen_string_literal: true
+
 require 'openssl'
 require 'zlib'
-require 'rack/encryptor'
-require 'rack/request'
-require 'rack/response'
-require 'rack/session/abstract/id'
+require_relative 'abstract/id'
 require 'json'
+require 'base64'
 
 module Rack
 
@@ -62,15 +62,15 @@ module Rack
     #   })
     #
 
-    class Cookie < Abstract::Persisted
+    class Cookie < Abstract::PersistedSecure
       # Encode session cookies as Base64
       class Base64
         def encode(str)
-          [str].pack('m0')
+          ::Base64.strict_encode64(str)
         end
 
         def decode(str)
-          str.unpack('m').first
+          ::Base64.decode64(str)
         end
 
         # Encode session cookies as Marshaled Base64 data
@@ -130,12 +130,10 @@ module Rack
 
       attr_reader :coder
 
-      def initialize(app, options={})
-        # Assume keys are hex strings and convert them to raw byte strings for
-        # actual key material
-        @secrets = options.values_at(:secret, :old_secret).compact.map { |secret|
-          [secret].pack('H*')
-        }
+      def initialize(app, options = {})
+        # TODO handle decoding of keys (hex, base64) to actual key material
+        @secrets = options.values_at(:secret, :old_secret).compact
+        @hmac = options.fetch(:hmac, OpenSSL::Digest::SHA1)
 
         warn <<-MSG unless secure?(options)
         SECURITY WARNING: No secret option provided to Rack::Session::Cookie.
@@ -176,7 +174,7 @@ module Rack
         # If no encryption is used, rely on the previous default (Base64::Marshal)
         @coder = (options[:coder] ||= (@secrets.any? ? Marshal.new : Base64::Marshal.new))
 
-        super(app, options.merge!(:cookie_only => true))
+        super(app, options.merge!(cookie_only: true))
       end
 
       private
@@ -197,17 +195,16 @@ module Rack
 
           # Try to decrypt with the first secret, if that returns nil, try
           # with old_secret
-          unless @secrets.empty?
+          if @secrets.size > 0 && session_data
             session_data = Rack::Encryptor.decrypt_message(cookie_data, @secrets.first)
             session_data ||= Rack::Encryptor.decrypt_message(cookie_data, @secrets[1]) if @secrets.size > 1
           end
 
-          # If session_data is still nil, are there is a legacy HMAC
-          # configured, try verify and parse the cookie that way
+          # If session_data is still nil, there is a legacy HMAC
+          # configured, try to verify and parse the cookie that way
           if !session_data && @legacy_hmac
-            digest = cookie_data.slice!(-@legacy_hmac_length..-1)
-            cookie_data.slice!(-2..-1) # remove double dash
-            session_data = cookie_data if digest_match?(cookie_data, digest)
+            session_data, _, digest = session_data.rpartition('--')
+            session_data = nil unless digest_match?(session_data, digest)
 
             # Decode using legacy HMAC decoder
             request.set_header(k, @legacy_hmac_coder.decode(session_data) || {})
@@ -217,10 +214,19 @@ module Rack
         end
       end
 
-      def persistent_session_id!(data, sid=nil)
+      def persistent_session_id!(data, sid = nil)
         data ||= {}
         data["session_id"] ||= sid || generate_sid
         data
+      end
+
+      class SessionId < DelegateClass(Session::SessionId)
+        attr_reader :cookie_value
+
+        def initialize(session_id, cookie_value)
+          super(session_id)
+          @cookie_value = cookie_value
+        end
       end
 
       def write_session(req, session_id, session, options)
@@ -235,7 +241,7 @@ module Rack
           req.get_header(RACK_ERRORS).puts("Warning! Rack::Session::Cookie data size exceeds 4K.")
           nil
         else
-          session_data
+          SessionId.new(session_id, session_data)
         end
       end
 

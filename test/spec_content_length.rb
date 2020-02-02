@@ -1,7 +1,6 @@
-require 'minitest/autorun'
-require 'rack/content_length'
-require 'rack/lint'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::ContentLength do
   def content_length(app)
@@ -13,22 +12,22 @@ describe Rack::ContentLength do
   end
 
   it "set Content-Length on Array bodies if none is set" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, ["Hello, World!"]] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, ["Hello, World!"]] }
     response = content_length(app).call(request)
     response[1]['Content-Length'].must_equal '13'
   end
 
-  it "not set Content-Length on variable length bodies" do
+  it "set Content-Length on variable length bodies" do
     body = lambda { "Hello World!" }
     def body.each ; yield call ; end
 
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, body] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, body] }
     response = content_length(app).call(request)
-    response[1]['Content-Length'].must_be_nil
+    response[1]['Content-Length'].must_equal '12'
   end
 
   it "not change Content-Length if it is already set" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain', 'Content-Length' => '1'}, "Hello, World!"] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain', 'Content-Length' => '1' }, "Hello, World!"] }
     response = content_length(app).call(request)
     response[1]['Content-Length'].must_equal '1'
   end
@@ -40,7 +39,7 @@ describe Rack::ContentLength do
   end
 
   it "not set Content-Length when Transfer-Encoding is chunked" do
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain', 'Transfer-Encoding' => 'chunked'}, []] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain', 'Transfer-Encoding' => 'chunked' }, []] }
     response = content_length(app).call(request)
     response[1]['Content-Length'].must_be_nil
   end
@@ -62,7 +61,7 @@ describe Rack::ContentLength do
       def to_ary; end
     end.new(%w[one two three])
 
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, body] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, body] }
     response = content_length(app).call(request)
     body.closed.must_be_nil
     response[2].close
@@ -77,7 +76,7 @@ describe Rack::ContentLength do
       def to_ary; end
     end.new(%w[one two three])
 
-    app = lambda { |env| [200, {'Content-Type' => 'text/plain'}, body] }
+    app = lambda { |env| [200, { 'Content-Type' => 'text/plain' }, body] }
     response = content_length(app).call(request)
     expected = %w[one two three]
     response[1]['Content-Length'].must_equal expected.join.size.to_s

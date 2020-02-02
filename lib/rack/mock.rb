@@ -1,9 +1,9 @@
+# frozen_string_literal: true
+
 require 'uri'
 require 'stringio'
-require 'rack'
-require 'rack/lint'
-require 'rack/utils'
-require 'rack/response'
+require_relative '../rack'
+require 'cgi/cookie'
 
 module Rack
   # Rack::MockRequest helps testing your Rack application without
@@ -53,16 +53,26 @@ module Rack
       @app = app
     end
 
-    def get(uri, opts={})     request(GET, uri, opts)     end
-    def post(uri, opts={})    request(POST, uri, opts)    end
-    def put(uri, opts={})     request(PUT, uri, opts)     end
-    def patch(uri, opts={})   request(PATCH, uri, opts)   end
-    def delete(uri, opts={})  request(DELETE, uri, opts)  end
-    def head(uri, opts={})    request(HEAD, uri, opts)    end
-    def options(uri, opts={}) request(OPTIONS, uri, opts) end
+    # Make a GET request and return a MockResponse. See #request.
+    def get(uri, opts = {})     request(GET, uri, opts)     end
+    # Make a POST request and return a MockResponse. See #request.
+    def post(uri, opts = {})    request(POST, uri, opts)    end
+    # Make a PUT request and return a MockResponse. See #request.
+    def put(uri, opts = {})     request(PUT, uri, opts)     end
+    # Make a PATCH request and return a MockResponse. See #request.
+    def patch(uri, opts = {})   request(PATCH, uri, opts)   end
+    # Make a DELETE request and return a MockResponse. See #request.
+    def delete(uri, opts = {})  request(DELETE, uri, opts)  end
+    # Make a HEAD request and return a MockResponse. See #request.
+    def head(uri, opts = {})    request(HEAD, uri, opts)    end
+    # Make an OPTIONS request and return a MockResponse. See #request.
+    def options(uri, opts = {}) request(OPTIONS, uri, opts) end
 
-    def request(method=GET, uri="", opts={})
-      env = self.class.env_for(uri, opts.merge(:method => method))
+    # Make a request using the given request method for the given
+    # uri to the rack application and return a MockResponse.
+    # Options given are passed to MockRequest.env_for.
+    def request(method = GET, uri = "", opts = {})
+      env = self.class.env_for(uri, opts.merge(method: method))
 
       if opts[:lint]
         app = Rack::Lint.new(@app)
@@ -71,7 +81,7 @@ module Rack
       end
 
       errors = env[RACK_ERRORS]
-      status, headers, body  = app.call(env)
+      status, headers, body = app.call(env)
       MockResponse.new(status, headers, body, errors)
     ensure
       body.close if body.respond_to?(:close)
@@ -85,7 +95,14 @@ module Rack
     end
 
     # Return the Rack environment used for a request to +uri+.
-    def self.env_for(uri="", opts={})
+    # All options that are strings are added to the returned environment.
+    # Options:
+    # :fatal :: Whether to raise an exception if request outputs to rack.errors
+    # :input :: The rack.input to set
+    # :method :: The HTTP request method to use
+    # :params :: The params to use
+    # :script_name :: The SCRIPT_NAME to set
+    def self.env_for(uri = "", opts = {})
       uri = parse_uri_rfc2396(uri)
       uri.path = "/#{uri.path}" unless uri.path[0] == ?/
 
@@ -154,17 +171,24 @@ module Rack
   # MockRequest.
 
   class MockResponse < Rack::Response
+    class << self
+      alias [] new
+    end
+
     # Headers
-    attr_reader :original_headers
+    attr_reader :original_headers, :cookies
 
     # Errors
     attr_accessor :errors
 
-    def initialize(status, headers, body, errors=StringIO.new(""))
+    def initialize(status, headers, body, errors = StringIO.new(""))
       @original_headers = headers
       @errors           = errors.string if errors.respond_to?(:string)
+      @cookies = parse_cookies_from_header
 
       super(body, status, headers)
+
+      buffered_body!
     end
 
     def =~(other)
@@ -186,11 +210,64 @@ module Rack
       #     ...
       #     res.body.should == "foo!"
       #   end
-      super.join
+      buffer = String.new
+
+      super.each do |chunk|
+        buffer << chunk
+      end
+
+      return buffer
     end
 
     def empty?
       [201, 204, 304].include? status
     end
+
+    def cookie(name)
+      cookies.fetch(name, nil)
+    end
+
+    private
+
+    def parse_cookies_from_header
+      cookies = Hash.new
+      if original_headers.has_key? 'Set-Cookie'
+        set_cookie_header = original_headers.fetch('Set-Cookie')
+        set_cookie_header.split("\n").each do |cookie|
+          cookie_name, cookie_filling = cookie.split('=', 2)
+          cookie_attributes = identify_cookie_attributes cookie_filling
+          parsed_cookie = CGI::Cookie.new(
+            'name' => cookie_name.strip,
+            'value' => cookie_attributes.fetch('value'),
+            'path' => cookie_attributes.fetch('path', nil),
+            'domain' => cookie_attributes.fetch('domain', nil),
+            'expires' => cookie_attributes.fetch('expires', nil),
+            'secure' => cookie_attributes.fetch('secure', false)
+          )
+          cookies.store(cookie_name, parsed_cookie)
+        end
+      end
+      cookies
+    end
+
+    def identify_cookie_attributes(cookie_filling)
+      cookie_bits = cookie_filling.split(';')
+      cookie_attributes = Hash.new
+      cookie_attributes.store('value', cookie_bits[0].strip)
+      cookie_bits.each do |bit|
+        if bit.include? '='
+          cookie_attribute, attribute_value = bit.split('=')
+          cookie_attributes.store(cookie_attribute.strip, attribute_value.strip)
+          if cookie_attribute.include? 'max-age'
+            cookie_attributes.store('expires', Time.now + attribute_value.strip.to_i)
+          end
+        end
+        if bit.include? 'secure'
+          cookie_attributes.store('secure', true)
+        end
+      end
+      cookie_attributes
+    end
+
   end
 end

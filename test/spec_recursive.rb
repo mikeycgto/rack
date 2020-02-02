@@ -1,7 +1,6 @@
-require 'minitest/autorun'
-require 'rack/lint'
-require 'rack/recursive'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::Recursive do
   before do

@@ -1,4 +1,4 @@
-require 'rack/utils'
+# frozen_string_literal: true
 
 module Rack
 
@@ -19,7 +19,7 @@ module Rack
       status, headers, body = @app.call(env)
       headers = Utils::HeaderHash.new(headers)
 
-      unless STATUS_WITH_NO_ENTITY_BODY.include?(status)
+      unless STATUS_WITH_NO_ENTITY_BODY.key?(status.to_i)
         headers[CONTENT_TYPE] ||= @content_type
       end
 

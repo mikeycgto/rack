@@ -1,6 +1,6 @@
+# frozen_string_literal: true
+
 require 'erb'
-require 'rack/request'
-require 'rack/utils'
 
 module Rack
   # Rack::ShowStatus catches all empty responses and replaces them
@@ -52,8 +52,8 @@ module Rack
 
     # :stopdoc:
 
-# adapted from Django <djangoproject.com>
-# Copyright (c) 2005, the Lawrence Journal-World
+# adapted from Django <www.djangoproject.com>
+# Copyright (c) Django Software Foundation and individual contributors.
 # Used under the modified BSD license:
 # http://www.xfree86.org/3.3.6/COPYRIGHT2.html#5
 TEMPLATE = <<'HTML'

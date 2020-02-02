@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Rack
   # *Handlers* connect web servers with Rack.
   #
@@ -17,7 +19,7 @@ module Rack
       end
 
       if klass = @handlers[server]
-        klass.split("::").inject(Object) { |o, x| o.const_get(x) }
+        const_get(klass)
       else
         const_get(server, false)
       end
@@ -43,6 +45,9 @@ module Rack
       raise LoadError, "Couldn't find handler for: #{server_names.join(', ')}."
     end
 
+    SERVER_NAMES = %w(puma thin falcon webrick).freeze
+    private_constant :SERVER_NAMES
+
     def self.default
       # Guess.
       if ENV.include?("PHP_FCGI_CHILDREN")
@@ -52,7 +57,7 @@ module Rack
       elsif ENV.include?("RACK_HANDLER")
         self.get(ENV["RACK_HANDLER"])
       else
-        pick ['puma', 'thin', 'webrick']
+        pick SERVER_NAMES
       end
     end
 

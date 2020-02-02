@@ -1,6 +1,6 @@
-require 'minitest/autorun'
-require 'rack/urlmap'
-require 'rack/mock'
+# frozen_string_literal: true
+
+require_relative 'helper'
 
 describe Rack::URLMap do
   it "dispatches paths correctly" do
@@ -117,6 +117,14 @@ describe Rack::URLMap do
     res.must_be :ok?
     res["X-Position"].must_equal "default.org"
 
+    res = Rack::MockRequest.new(map).get("/", "HTTP_HOST" => "any-host.org")
+    res.must_be :ok?
+    res["X-Position"].must_equal "default.org"
+
+    res = Rack::MockRequest.new(map).get("/", "HTTP_HOST" => "any-host.org", "HTTP_X_FORWARDED_HOST" => "any-host.org")
+    res.must_be :ok?
+    res["X-Position"].must_equal "default.org"
+
     res = Rack::MockRequest.new(map).get("/",
                                          "HTTP_HOST" => "example.org:9292",
                                          "SERVER_PORT" => "9292")
@@ -127,7 +135,7 @@ describe Rack::URLMap do
   it "be nestable" do
     map = Rack::Lint.new(Rack::URLMap.new("/foo" =>
       Rack::URLMap.new("/bar" =>
-        Rack::URLMap.new("/quux" =>  lambda { |env|
+        Rack::URLMap.new("/quux" => lambda { |env|
                            [200,
                             { "Content-Type" => "text/plain",
                               "X-Position" => "/foo/bar/quux",
@@ -233,5 +241,11 @@ describe Rack::URLMap do
     res["X-Position"].must_equal "root"
     res["X-PathInfo"].must_equal "/"
     res["X-ScriptName"].must_equal ""
+  end
+
+  it "not allow locations unless they start with /" do
+    lambda do
+      Rack::URLMap.new("a/" => lambda { |env| })
+    end.must_raise ArgumentError
   end
 end
