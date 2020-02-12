@@ -1,53 +1,85 @@
 # frozen_string_literal: true
 
-require 'minitest/autorun'
+require_relative 'helper'
 require 'rack/encryptor'
 require 'rack/utils'
 
 describe Rack::Encryptor do
   def setup
-    @secret = OpenSSL::Cipher.new(Rack::Encryptor::ENCRYPTION_CIPHER).random_key
+    @secret = SecureRandom.random_bytes(64)
   end
 
-  it 'encrypted message contains ciphertext iv and auth_tag' do
-    msg = Rack::Encryptor.encrypt_message('hello world', @secret)
+  it 'initialize does not destroy key string' do
+    encryptor = Rack::Encryptor.new(@secret)
 
-    ctxt, iv, auth_tag = msg.split(Rack::Encryptor::ENCRYPTION_DELIMITER, 3)
-
-    ctxt.wont_be :empty?
-    iv.wont_be :empty?
-    auth_tag.wont_be :empty?
+    @secret.size.must_equal 64
   end
 
-  it 'encrypted message is decryptable' do
-    cmsg = Rack::Encryptor.encrypt_message('hello world', @secret)
-    pmsg = Rack::Encryptor.decrypt_message(cmsg, @secret)
+  it 'decrypts an encrypted message' do
+    encryptor = Rack::Encryptor.new(@secret)
 
-    pmsg.must_equal 'hello world'
+    message = encryptor.encrypt(foo: 'bar')
+
+    encryptor.decrypt(message).must_equal foo: 'bar'
   end
 
-  it 'encryptor and decryptor handles overly long keys' do
-    new_secret = "#{@secret}abcdef123456"
+  it 'decrypt raises InvalidSignature for tampered messages' do
+    encryptor = Rack::Encryptor.new(@secret)
 
-    # These methods should truncate the long key (so OpenSSL raises an exception)
-    cmsg = Rack::Encryptor.encrypt_message('hello world', new_secret)
-    pmsg = Rack::Encryptor.decrypt_message(cmsg, new_secret)
+    message = encryptor.encrypt(foo: 'bar')
 
-    pmsg.must_equal 'hello world'
+    decoded_message = Base64.urlsafe_decode64(message)
+    tampered_message = Base64.urlsafe_encode64(decoded_message.tap { |m|
+      m[m.size - 1] = "\0"
+    })
+
+    lambda {
+      encryptor.decrypt(tampered_message)
+    }.must_raise Rack::Encryptor::InvalidSignature
   end
 
-  it 'decrypt returns nil for junk messages' do
-    Rack::Encryptor.decrypt_message('aaa--bbb-ccc', @secret).must_be_nil
+  it 'decrypts an encrypted message with gzip' do
+    encryptor = Rack::Encryptor.new(@secret, gzip_over: 1)
+
+    message = encryptor.encrypt(foo: 'bar')
+
+    encryptor.decrypt(message).must_equal foo: 'bar'
   end
 
-  it 'decrypt returns nil for tampered messages' do
-    cmsg = Rack::Encryptor.encrypt_message('hello world', @secret)
+  it 'encryptor with gzip reduces size on large messages' do
+    encryptor_without = Rack::Encryptor.new(@secret)
+    encryptor_with = Rack::Encryptor.new(@secret, gzip_over: 1)
 
-    csplit = cmsg.split(Rack::Encryptor::ENCRYPTION_DELIMITER, 3)
-    csplit[2] = csplit.last.reverse
+    message_without = encryptor_without.encrypt('A' * 1000)
+    message_with = encryptor_with.encrypt('A' * 1000)
 
-    tampered_msg = csplit.join(Rack::Encryptor::ENCRYPTION_DELIMITER)
+    # gzipped version is at least 4 times smaller
+    (message_with.size * 4).must_be :<, message_without.size
+  end
 
-    Rack::Encryptor.decrypt_message(tampered_msg, @secret).must_be_nil
+  it 'decrypts an encrypted message with purpose' do
+    encryptor = Rack::Encryptor.new(@secret, purpose: 'testing')
+
+    message = encryptor.encrypt(foo: 'bar')
+
+    encryptor.decrypt(message).must_equal foo: 'bar'
+  end
+
+  it 'decrypts raises InvalidSignature without purpose' do
+    encryptor = Rack::Encryptor.new(@secret, purpose: 'testing')
+    other_encryptor = Rack::Encryptor.new(@secret)
+
+    message = other_encryptor.encrypt(foo: 'bar')
+
+    lambda { encryptor.decrypt(message) }.must_raise Rack::Encryptor::InvalidSignature
+  end
+
+  it 'decrypts raises InvalidSignature with different purpose' do
+    encryptor = Rack::Encryptor.new(@secret, purpose: 'testing')
+    other_encryptor = Rack::Encryptor.new(@secret, purpose: 'other')
+
+    message = other_encryptor.encrypt(foo: 'bar')
+
+    lambda { encryptor.decrypt(message) }.must_raise Rack::Encryptor::InvalidSignature
   end
 end
