@@ -58,13 +58,13 @@ describe Rack::Session::Cookie do
     Rack::MockRequest.new(app_with_cookie).get("/", request_options)
   end
 
-  def random_cipher_secret
-    OpenSSL::Cipher.new('aes-256-gcm').random_key.unpack('H*').first
+  def random_encryptor_secret
+    SecureRandom.random_bytes(64)
   end
 
   before do
     # Random key, as a hex string
-    @secret = random_cipher_secret
+    @secret = random_encryptor_secret
 
     @warnings = warnings = []
     Rack::Session::Cookie.class_eval do
@@ -160,15 +160,15 @@ describe Rack::Session::Cookie do
     Rack::Session::Cookie.new(incrementor)
     @warnings.first.must_match(/no secret/i)
     @warnings.clear
-    Rack::Session::Cookie.new(incrementor, secret: @secret)
+    Rack::Session::Cookie.new(incrementor, secrets: @secret)
     @warnings.must_be :empty?
   end
 
   it 'warns if secret is too short' do
-    Rack::Session::Cookie.new(incrementor, secret: @secret[0, 16])
+    Rack::Session::Cookie.new(incrementor, secrets: @secret[0, 16])
     @warnings.first.must_match(/secret is not long enough/i)
     @warnings.clear
-    Rack::Session::Cookie.new(incrementor, secret: @secret)
+    Rack::Session::Cookie.new(incrementor, secrets: @secret)
     @warnings.must_be :empty?
   end
 
@@ -260,7 +260,7 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
 
     response = response_for(
-      app: [incrementor, { secret: @secret }],
+      app: [incrementor, { secrets: @secret }],
       cookie: "rack.session="
     )
     response.body.must_equal '{"counter"=>1}'
@@ -272,8 +272,8 @@ describe Rack::Session::Cookie do
     }.must_raise Rack::MockRequest::FatalWarning
   end
 
-  it "loads from a cookie with integrity hash" do
-    app = [incrementor, { secret: @secret }]
+  it "loads from a cookie with encryption" do
+    app = [incrementor, { secrets: @secret }]
 
     response = response_for(app: app)
     response = response_for(app: app, cookie: response)
@@ -282,24 +282,24 @@ describe Rack::Session::Cookie do
     response = response_for(app: app, cookie: response)
     response.body.must_equal '{"counter"=>3}'
 
-    app = [incrementor, { secret: random_cipher_secret }]
+    app = [incrementor, { secrets: random_encryptor_secret }]
 
     response = response_for(app: app, cookie: response)
     response.body.must_equal '{"counter"=>1}'
   end
 
   it "loads from a cookie with accept-only integrity hash for graceful key rotation" do
-    response = response_for(app: [incrementor, { secret: @secret }])
+    response = response_for(app: [incrementor, { secrets: @secret }])
 
-    new_secret = random_cipher_secret
+    new_secret = random_encryptor_secret
 
-    app = [incrementor, { secret: new_secret, old_secret: @secret }]
+    app = [incrementor, { secrets: [new_secret, @secret] }]
     response = response_for(app: app, cookie: response)
     response.body.must_equal '{"counter"=>2}'
 
-    newer_secret = random_cipher_secret
+    newer_secret = random_encryptor_secret
 
-    app = [incrementor, { secret: newer_secret, old_secret: new_secret }]
+    app = [incrementor, { secrets: [newer_secret, new_secret] }]
     response = response_for(app: app, cookie: response)
 
     response.body.must_equal '{"counter"=>3}'
@@ -312,13 +312,13 @@ describe Rack::Session::Cookie do
 
     legacy_cookie = "rack.session=#{legacy_session}--#{legacy_digest}; path=/; HttpOnly"
 
-    app = [incrementor, { secret: @secret, legacy_hmac_secret: legacy_secret }]
+    app = [incrementor, { secrets: @secret, legacy_hmac_secret: legacy_secret }]
     response = response_for(app: app, cookie: legacy_cookie)
     response.body.must_equal '{"counter"=>2}'
   end
 
-  it "ignores tampered with session cookies" do
-    app = [incrementor, { secret: @secret }]
+  it "ignores tampered session cookies" do
+    app = [incrementor, { secrets: @secret }]
 
     response = response_for(app: app)
     response.body.must_equal '{"counter"=>1}'
@@ -326,10 +326,14 @@ describe Rack::Session::Cookie do
     response = response_for(app: app, cookie: response)
     response.body.must_equal '{"counter"=>2}'
 
-    ctxt, iv, auth_tag = response["Set-Cookie"].split("--", 3)
-    tampered_with_cookie = [ctxt, iv, auth_tag.reverse].join('--')
+    encoded_cookie =response["Set-Cookie"].split('=', 2).last.split(';').first
+    decoded_cookie = Base64.urlsafe_decode64(Rack::Utils.unescape(encoded_cookie))
 
-    response = response_for(app: app, cookie: tampered_with_cookie)
+    tampered_cookie = Base64.urlsafe_encode64(decoded_cookie.tap { |m|
+      m[m.size - 1] = "\0"
+    })
+
+    response = response_for(app: app, cookie: tampered_cookie)
     response.body.must_equal '{"counter"=>1}'
   end
 
@@ -345,22 +349,6 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
   end
 
-  it "supports either of secret or old_secret" do
-    app = [incrementor, { secret: @secret }]
-    response = response_for(app: app)
-    response.body.must_equal '{"counter"=>1}'
-
-    response = response_for(app: app, cookie: response)
-    response.body.must_equal '{"counter"=>2}'
-
-    app = [incrementor, { old_secret: @secret }]
-    response = response_for(app: app)
-    response.body.must_equal '{"counter"=>1}'
-
-    response = response_for(app: app, cookie: response)
-    response.body.must_equal '{"counter"=>2}'
-  end
-
   it "supports custom digest class for legacy hmac cookie" do
     legacy_hmac    = OpenSSL::Digest::SHA256
     legacy_session = Rack::Session::Cookie::Base64::Marshal.new.encode({ 'counter' => 1, 'session_id' => 'abcdef' })
@@ -369,7 +357,8 @@ describe Rack::Session::Cookie do
     legacy_cookie = "rack.session=#{legacy_session}--#{legacy_digest}; path=/; HttpOnly"
 
     app = [incrementor, {
-      secret: @secret, legacy_hmac_secret: legacy_secret, legacy_hmac: legacy_hmac }]
+      secrets: @secret, legacy_hmac_secret: legacy_secret, legacy_hmac: legacy_hmac
+    }]
 
     response = response_for(app: app, cookie: legacy_cookie)
     response.body.must_equal '{"counter"=>2}'
@@ -447,8 +436,8 @@ describe Rack::Session::Cookie do
     response["Set-Cookie"].must_be_nil
   end
 
-  it "exposes :secret in env['rack.session.option']" do
-    response = response_for(app: [session_option[:secret], { secret: @secret }])
+  it "exposes :secrets in env['rack.session.option']" do
+    response = response_for(app: [session_option[:secrets], { secrets: @secret }])
     response.body.must_equal @secret.inspect
   end
 
@@ -457,8 +446,8 @@ describe Rack::Session::Cookie do
     response.body.must_match(/Base64::Marshal/)
   end
 
-  it 'exposes correct :coder when a secret is used' do
-    response = response_for(app: session_option[:coder], secret: @secret)
+  it 'exposes correct :coder when a secrets is used' do
+    response = response_for(app: session_option[:coder], secrets: @secret)
     response.body.must_match(/Marshal/)
   end
 
@@ -484,6 +473,7 @@ describe Rack::Session::Cookie do
       hash.delete("session_id")
       Rack::Response.new(hash["message"]).to_a
     end
+
     # another example of an unsafe coder is Base64.urlsafe_encode64
     unsafe_coder = Class.new {
       def encode(hash); hash.inspect end
@@ -496,8 +486,10 @@ describe Rack::Session::Cookie do
     legacy_cookie = "rack.session=#{Rack::Utils.escape legacy_session}--#{legacy_digest}; path=/; HttpOnly"
 
     _app = [ app, {
-      secret: @secret, legacy_hmac_secret: legacy_secret,
-      legacy_hmac_coder: unsafe_coder } ]
+      secrets: @secret,
+      legacy_hmac_secret: legacy_secret,
+      legacy_hmac_coder: unsafe_coder
+    }]
 
     response = response_for(app: _app, cookie: legacy_cookie)
     response.body.must_equal "1--2--3--"
