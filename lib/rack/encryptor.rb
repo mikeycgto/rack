@@ -69,7 +69,7 @@ module Rack
       cipher_secret = data.slice!(0, 32)
       cipher_iv = data.slice!(0, 16)
 
-      cipher = new_ciper
+      cipher = new_cipher
       cipher.decrypt
       cipher.key = cipher_secret
       cipher.iv = cipher_iv
@@ -86,7 +86,7 @@ module Rack
       serialized_payload = serialize_payload(message)
       message_secret, cipher_secret = new_message_and_cipher_secret
 
-      cipher = new_ciper
+      cipher = new_cipher
       cipher.encrypt
       cipher.key = cipher_secret
       cipher_iv = cipher.random_iv
@@ -105,7 +105,7 @@ module Rack
 
     private
 
-    def new_ciper
+    def new_cipher
       OpenSSL::Cipher.new('aes-256-ctr')
     end
 
