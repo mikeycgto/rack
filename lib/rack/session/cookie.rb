@@ -280,7 +280,8 @@ module Rack
       end
 
       def encode_session_data(session)
-        if encryptors.empty? then coder.encode(session)
+        if encryptors.empty?
+          coder.encode(session)
         else
           encryptors.first.encrypt(session)
         end
