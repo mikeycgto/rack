@@ -337,6 +337,20 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
   end
 
+  it 'rejects session cookie with different purpose' do
+    app = [incrementor, { secrets: @secrets }]
+    other_app = [incrementor, { secrets: @secrets, key: 'other' }]
+
+    response = response_for(app: app)
+    response.body.must_equal '{"counter"=>1}'
+
+    response = response_for(app: app, cookie: response)
+    response.body.must_equal '{"counter"=>2}'
+
+    response = response_for(app: other_app, cookie: response)
+    response.body.must_equal '{"counter"=>1}'
+  end
+
   it 'adds to RACK_ERRORS on encryptor errors' do
     echo_rack_errors = lambda do |env|
       env["rack.session"]["counter"] ||= 0
