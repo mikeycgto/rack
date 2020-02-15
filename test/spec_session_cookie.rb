@@ -329,9 +329,9 @@ describe Rack::Session::Cookie do
     encoded_cookie =response["Set-Cookie"].split('=', 2).last.split(';').first
     decoded_cookie = Base64.urlsafe_decode64(Rack::Utils.unescape(encoded_cookie))
 
-    tampered_cookie = Base64.urlsafe_encode64(decoded_cookie.tap { |m|
+    tampered_cookie = "rack.session=#{Base64.urlsafe_encode64(decoded_cookie.tap { |m|
       m[m.size - 1] = "\0"
-    })
+    })}"
 
     response = response_for(app: app, cookie: tampered_cookie)
     response.body.must_equal '{"counter"=>1}'
