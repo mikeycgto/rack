@@ -211,8 +211,9 @@ module Rack
             begin
               session_data = encryptor.decrypt(cookie_data) if cookie_data
               break
-            rescue Rack::Encryptor::Error
-              # TODO warn? should there be some sort of external signal?
+            rescue Rack::Encryptor::Error => error
+              request.env[Rack::RACK_ERRORS].puts "Session cookie encryptor error: #{error.message}"
+
               next
             end
           end

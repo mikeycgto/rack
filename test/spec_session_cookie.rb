@@ -337,6 +337,30 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
   end
 
+  it 'adds to RACK_ERRORS on encryptor errors' do
+    echo_rack_errors = lambda do |env|
+      env["rack.session"]["counter"] ||= 0
+      env["rack.session"]["counter"] += 1
+      Rack::Response.new(env[Rack::RACK_ERRORS].flush.tap(&:rewind).read).to_a
+    end
+
+    app = [incrementor, { secrets: @secret }]
+    err_app = [echo_rack_errors, { secrets: @secret }]
+
+    response = response_for(app: app)
+    response.body.must_equal '{"counter"=>1}'
+
+    encoded_cookie = response["Set-Cookie"].split('=', 2).last.split(';').first
+    decoded_cookie = Base64.urlsafe_decode64(Rack::Utils.unescape(encoded_cookie))
+
+    tampered_cookie = "rack.session=#{Base64.urlsafe_encode64(decoded_cookie.tap { |m|
+      m[m.size - 1] = "\0"
+    })}"
+
+    response = response_for(app: err_app, cookie: tampered_cookie)
+    response.body.must_equal "Session cookie encryptor error: HMAC is invalid\n"
+  end
+
   it 'ignores tampered with legacy hmac cookie' do
     legacy_session = Rack::Session::Cookie::Base64::Marshal.new.encode({ 'counter' => 1, 'session_id' => 'abcdef' })
     legacy_secret  = 'test legacy secret'
