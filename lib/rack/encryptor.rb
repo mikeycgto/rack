@@ -16,8 +16,6 @@ module Rack
     class InvalidMessage < Error
     end
 
-    DEFLATE_BIT = 0x1000
-
     # The secret String must be at least 64 bytes in size. The first 32 bytes
     # will be used for the encryption cipher key. The remainder will be used
     # for an HMAC key.
@@ -26,9 +24,6 @@ module Rack
     # * :serialize_json
     #     Use JSON for message serialization instead of Marshal. This can be
     #     viewed as a security ehancement.
-    # * :gzip_over
-    #     For message data over this many bytes, compress it with the deflate
-    #     algorithm.
     # * :purpose
     #     Limit messages to a specific purpose. This can be viewed as a
     #     security enhancement to prevent message reuse from different contexts
@@ -48,7 +43,7 @@ module Rack
       raise ArgumentError, "invalid secret: #{secret.bytesize}, must be >=64" unless secret.bytesize >= 64
 
       @options = {
-        serialize_json: false, gzip_over: nil, purpose: nil
+        serialize_json: false, purpose: nil
       }.update(opts)
 
       @hmac_secret = secret.dup.force_encoding('BINARY')
@@ -135,32 +130,13 @@ module Rack
       end
     end
 
-    # Returns a serialized payload that includes the serialized message and a
-    # set of encoding options stored in a bitmap.
-    #
-    # Currently, the bitmap is 2 bytes in size.
+    # Returns a serialized payload of the message
     def serialize_payload(message)
-      serialized_data = serializer.dump(message)
-
-      bitmap = 0
-
-      if !@options[:gzip_over].nil? && serialized_data.size > @options[:gzip_over]
-        serialized_data = Zlib.deflate(serialized_data)
-
-        bitmap |= DEFLATE_BIT
-      end
-
-      "#{[bitmap].pack('v')}#{serialized_data}"
+      serializer.dump message
     end
 
     def deserialized_data(serialized_data)
-      bitmap, = serialized_data.slice!(0, 2).unpack('v')
-
-      if bitmap & DEFLATE_BIT > 0
-        serialized_data = Zlib::Inflate.inflate(serialized_data)
-      end
-
-      serializer.load(serialized_data)
+      serializer.load serialized_data
     end
   end
 end

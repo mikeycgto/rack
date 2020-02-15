@@ -38,25 +38,6 @@ describe Rack::Encryptor do
     }.must_raise Rack::Encryptor::InvalidSignature
   end
 
-  it 'decrypts an encrypted message with gzip' do
-    encryptor = Rack::Encryptor.new(@secret, gzip_over: 1)
-
-    message = encryptor.encrypt(foo: 'bar')
-
-    encryptor.decrypt(message).must_equal foo: 'bar'
-  end
-
-  it 'encryptor with gzip reduces size on large messages' do
-    encryptor_without = Rack::Encryptor.new(@secret)
-    encryptor_with = Rack::Encryptor.new(@secret, gzip_over: 1)
-
-    message_without = encryptor_without.encrypt('A' * 1000)
-    message_with = encryptor_with.encrypt('A' * 1000)
-
-    # gzipped version is at least 4 times smaller
-    (message_with.size * 4).must_be :<, message_without.size
-  end
-
   it 'decrypts an encrypted message with purpose' do
     encryptor = Rack::Encryptor.new(@secret, purpose: 'testing')
 

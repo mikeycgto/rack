@@ -151,12 +151,9 @@ module Rack
         # strings? it needs to be decoded and should be >= 64 bytes
         secrets = [*options[:secrets]]
 
-        encryptor_opts = { purpose: options[:key] }
-
-        # Slice out encryptor options to pass to Rack::Encryptor instances
-        %i[serialize_json gzip_over].each do |key, opts|
-          encryptor_opts[key] = options[key] if options.key? key
-        end
+        encryptor_opts = {
+          purpose: options[:key], serialize_json: options[:serialize_json]
+        }
 
         # For each secret, create an Encryptor. We have iterate this Array at
         # decryption time to achieve key rotation.
