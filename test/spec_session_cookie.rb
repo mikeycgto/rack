@@ -164,12 +164,10 @@ describe Rack::Session::Cookie do
     @warnings.must_be :empty?
   end
 
-  it 'warns if secret is too short' do
-    Rack::Session::Cookie.new(incrementor, secrets: @secret[0, 16])
-    @warnings.first.must_match(/secret is not long enough/i)
-    @warnings.clear
-    Rack::Session::Cookie.new(incrementor, secrets: @secret)
-    @warnings.must_be :empty?
+  it 'abort if secret is too short' do
+    lambda {
+      Rack::Session::Cookie.new(incrementor, secrets: @secret[0, 16])
+    }.must_raise ArgumentError
   end
 
   it "doesn't warn if coder is configured to handle encoding" do
