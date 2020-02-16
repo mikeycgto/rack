@@ -24,6 +24,10 @@ module Rack
     # * :serialize_json
     #     Use JSON for message serialization instead of Marshal. This can be
     #     viewed as a security ehancement.
+    # * :pad_size
+    #     Pad encrypted message data, to a multiple of this many bytes
+    #     (default: 32). This can be between 2-4096 bytes, or +nil+ to disable
+    #     padding.
     # * :purpose
     #     Limit messages to a specific purpose. This can be viewed as a
     #     security enhancement to prevent message reuse from different contexts
@@ -37,13 +41,23 @@ module Rack
     #  * version - 1 byte and is currently always 0x01
     #  * random_data - 32 bytes used for generating the per-message secret
     #  * IV - 16 bytes random initialization vector
-    #  * HMAC - 32 bytes HMAC-SHA-256 of all preceding data, plus the purpose value
+    #  * HMAC - 32 bytes HMAC-SHA-256 of all preceding data, plus the purpose
+    #    value
     def initialize(secret, opts = {})
       raise ArgumentError, "secret must be a String" unless String === secret
       raise ArgumentError, "invalid secret: #{secret.bytesize}, must be >=64" unless secret.bytesize >= 64
 
+      case opts[:pad_size]
+      when nil
+        # padding is disabled
+      when Integer
+        raise ArgumentError, "invalid pad_size: #{opts[:pad_size]}" unless (2..4096).include? opts[:pad_size]
+      else
+        raise ArgumentError, "invalid pad_size: #{opts[:pad_size]}; must be Integer or nil"
+      end
+
       @options = {
-        serialize_json: false, purpose: nil
+        serialize_json: false, pad_size: 32, purpose: nil
       }.update(opts)
 
       @hmac_secret = secret.dup.force_encoding('BINARY')
@@ -60,6 +74,7 @@ module Rack
 
       verify_authenticity! data, signature
 
+      # The version is reserved for future
       _version = data.slice!(0, 1)
       cipher_secret = data.slice!(0, 32)
       cipher_iv = data.slice!(0, 16)
@@ -70,7 +85,7 @@ module Rack
       cipher.iv = cipher_iv
       data = cipher.update(data) << cipher.final
 
-      deserialized_data data
+      deserialized_message data
     rescue ArgumentError
       raise InvalidSignature, 'Message invalid'
     end
@@ -130,12 +145,28 @@ module Rack
       end
     end
 
-    # Returns a serialized payload of the message
+    # Returns a serialized payload of the message. If a :pad_size is supplied,
+    # the message will be padded. The first 2 bytes of the returned string will
+    # indicating the amount of padding.
     def serialize_payload(message)
-      serializer.dump message
+      serialized_data = serializer.dump(message)
+
+      return "#{[0].pack('v')}#{serialized_data}" if @options[:pad_size].nil?
+
+      padding_bytes = @options[:pad_size] - (2 + serialized_data.size) % @options[:pad_size]
+      padding_data = SecureRandom.random_bytes(padding_bytes)
+
+      "#{[padding_bytes].pack('v')}#{padding_data}#{serialized_data}"
     end
 
-    def deserialized_data(serialized_data)
+    # Return the deserialized message. The first 2 bytes will be read as the
+    # amount of padding.
+    def deserialized_message(data)
+      # Read the first 2 bytes as the padding_bytes size
+      padding_bytes, = data.unpack('v')
+
+      # Slice out the serialized_data and deserialize it
+      serialized_data = data.slice(2 + padding_bytes, data.bytesize)
       serializer.load serialized_data
     end
   end
