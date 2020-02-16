@@ -15,6 +15,14 @@ describe Rack::Encryptor do
     @secret.size.must_equal 64
   end
 
+  it 'initialize raises ArgumentError on invalid key' do
+    lambda { Rack::Encryptor.new [:foo] }.must_raise ArgumentError
+  end
+
+  it 'initialize raises ArgumentError on short key' do
+    lambda { Rack::Encryptor.new 'key' }.must_raise ArgumentError
+  end
+
   it 'decrypts an encrypted message' do
     encryptor = Rack::Encryptor.new(@secret)
 
