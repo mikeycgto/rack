@@ -183,7 +183,7 @@ module Rack
 
         # Potential danger ahead! Marshal without verification and/or
         # encryption could present a major security issue.
-        @coder  = options[:coder] ||= Base64::Marshal.new
+        @coder = options[:coder] ||= Base64::Marshal.new
 
         super(app, options.merge!(cookie_only: true))
       end
