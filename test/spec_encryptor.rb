@@ -38,7 +38,7 @@ describe Rack::Encryptor do
 
     decoded_message = Base64.urlsafe_decode64(message)
     tampered_message = Base64.urlsafe_encode64(decoded_message.tap { |m|
-      m[m.size - 1] = "\0"
+      m[m.size - 1] = (m[m.size - 1].unpack('C')[0] ^ 1).chr
     })
 
     lambda {

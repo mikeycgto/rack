@@ -328,7 +328,7 @@ describe Rack::Session::Cookie do
     decoded_cookie = Base64.urlsafe_decode64(Rack::Utils.unescape(encoded_cookie))
 
     tampered_cookie = "rack.session=#{Base64.urlsafe_encode64(decoded_cookie.tap { |m|
-      m[m.size - 1] = "\0"
+      m[m.size - 1] = (m[m.size - 1].unpack('C')[0] ^ 1).chr
     })}"
 
     response = response_for(app: app, cookie: tampered_cookie)
