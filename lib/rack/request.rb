@@ -17,7 +17,7 @@ module Rack
     end
 
     self.ip_filter = lambda { |ip| /\A127\.0\.0\.1\Z|\A(10|172\.(1[6-9]|2[0-9]|30|31)|192\.168)\.|\A::1\Z|\Afd[0-9a-f]{2}:.+|\Alocalhost\Z|\Aunix\Z|\Aunix:/i.match?(ip) }
-    ALLOWED_SCHEMES = %w(https http).freeze
+    ALLOWED_SCHEMES = %w(https http wss ws).freeze
     SCHEME_WHITELIST = ALLOWED_SCHEMES
     if Object.respond_to?(:deprecate_constant)
       deprecate_constant :SCHEME_WHITELIST
@@ -88,7 +88,7 @@ module Rack
       #   assert_equal 'image/png,*/*', request.get_header('Accept')
       #
       # http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
-      def add_header key, v
+      def add_header(key, v)
         if v.nil?
           get_header key
         elsif has_header? key
@@ -129,11 +129,23 @@ module Rack
       # to include the port in a generated URI.
       DEFAULT_PORTS = { 'http' => 80, 'https' => 443, 'coffee' => 80 }
 
+      # The address of the client which connected to the proxy.
+      HTTP_X_FORWARDED_FOR = 'HTTP_X_FORWARDED_FOR'
+
+      # The contents of the host/:authority header sent to the proxy.
+      HTTP_X_FORWARDED_HOST = 'HTTP_X_FORWARDED_HOST'
+
+      # The value of the scheme sent to the proxy.
       HTTP_X_FORWARDED_SCHEME = 'HTTP_X_FORWARDED_SCHEME'
-      HTTP_X_FORWARDED_PROTO  = 'HTTP_X_FORWARDED_PROTO'
-      HTTP_X_FORWARDED_HOST   = 'HTTP_X_FORWARDED_HOST'
-      HTTP_X_FORWARDED_PORT   = 'HTTP_X_FORWARDED_PORT'
-      HTTP_X_FORWARDED_SSL    = 'HTTP_X_FORWARDED_SSL'
+
+      # The protocol used to connect to the proxy.
+      HTTP_X_FORWARDED_PROTO = 'HTTP_X_FORWARDED_PROTO'
+
+      # The port used to connect to the proxy.
+      HTTP_X_FORWARDED_PORT = 'HTTP_X_FORWARDED_PORT'
+
+      # Another way for specifing https scheme was used.
+      HTTP_X_FORWARDED_SSL = 'HTTP_X_FORWARDED_SSL'
 
       def body;            get_header(RACK_INPUT)                         end
       def script_name;     get_header(SCRIPT_NAME).to_s                   end
@@ -207,19 +219,52 @@ module Rack
         end
       end
 
+      # The authority of the incoming request as defined by RFC3976.
+      # https://tools.ietf.org/html/rfc3986#section-3.2
+      #
+      # In HTTP/1, this is the `host` header.
+      # In HTTP/2, this is the `:authority` pseudo-header.
       def authority
-        get_header(SERVER_NAME) + ':' + get_header(SERVER_PORT)
+        forwarded_authority || host_authority || server_authority
+      end
+
+      # The authority as defined by the `SERVER_NAME` and `SERVER_PORT`
+      # variables.
+      def server_authority
+        host = self.server_name
+        port = self.server_port
+
+        if host
+          if port
+            "#{host}:#{port}"
+          else
+            host
+          end
+        end
+      end
+
+      def server_name
+        get_header(SERVER_NAME)
+      end
+
+      def server_port
+        if port = get_header(SERVER_PORT)
+          Integer(port)
+        end
       end
 
       def cookies
-        hash = fetch_header(RACK_REQUEST_COOKIE_HASH) do |k|
-          set_header(k, {})
+        hash = fetch_header(RACK_REQUEST_COOKIE_HASH) do |key|
+          set_header(key, {})
         end
-        string = get_header HTTP_COOKIE
 
-        return hash if string == get_header(RACK_REQUEST_COOKIE_STRING)
-        hash.replace Utils.parse_cookies_header string
-        set_header(RACK_REQUEST_COOKIE_STRING, string)
+        string = get_header(HTTP_COOKIE)
+
+        unless string == get_header(RACK_REQUEST_COOKIE_STRING)
+          hash.replace Utils.parse_cookies_header(string)
+          set_header(RACK_REQUEST_COOKIE_STRING, string)
+        end
+
         hash
       end
 
@@ -232,38 +277,74 @@ module Rack
         get_header("HTTP_X_REQUESTED_WITH") == "XMLHttpRequest"
       end
 
-      def host_with_port
-        port = self.port
-        if port.nil? || port == DEFAULT_PORTS[scheme]
+      # The `HTTP_HOST` header.
+      def host_authority
+        get_header(HTTP_HOST)
+      end
+
+      def host_with_port(authority = self.authority)
+        host, _, port = split_authority(authority)
+
+        if port == DEFAULT_PORTS[self.scheme]
           host
         else
-          host = self.host
-          # If host is IPv6
-          host = "[#{host}]" if host.include?(':')
-          "#{host}:#{port}"
+          authority
         end
       end
 
+      # Returns a formatted host, suitable for being used in a URI.
       def host
-        # Remove port number.
-        strip_port hostname.to_s
+        split_authority(self.authority)[0]
+      end
+
+      # Returns an address suitable for being to resolve to an address.
+      # In the case of a domain name or IPv4 address, the result is the same
+      # as +host+. In the case of IPv6 or future address formats, the square
+      # brackets are removed.
+      def hostname
+        split_authority(self.authority)[1]
       end
 
       def port
-        result =
-          if port = extract_port(hostname)
-            port
-          elsif port = get_header(HTTP_X_FORWARDED_PORT)
-            port
-          elsif has_header?(HTTP_X_FORWARDED_HOST)
-            DEFAULT_PORTS[scheme]
-          elsif has_header?(HTTP_X_FORWARDED_PROTO)
-            DEFAULT_PORTS[extract_proto_header(get_header(HTTP_X_FORWARDED_PROTO))]
-          else
-            get_header(SERVER_PORT)
-          end
+        if authority = self.authority
+          _, _, port = split_authority(authority)
 
-        result.to_i unless result.to_s.empty?
+          if port
+            return port
+          end
+        end
+
+        if forwarded_port = self.forwarded_port
+          return forwarded_port.first
+        end
+
+        if scheme = self.scheme
+          if port = DEFAULT_PORTS[scheme]
+            return port
+          end
+        end
+
+        self.server_port
+      end
+
+      def forwarded_for
+        if value = get_header(HTTP_X_FORWARDED_FOR)
+          split_header(value).map do |authority|
+            split_authority(wrap_ipv6(authority))[1]
+          end
+        end
+      end
+
+      def forwarded_port
+        if value = get_header(HTTP_X_FORWARDED_PORT)
+          split_header(value).map(&:to_i)
+        end
+      end
+
+      def forwarded_authority
+        if value = get_header(HTTP_X_FORWARDED_HOST)
+          wrap_ipv6(split_header(value).first)
+        end
       end
 
       def ssl?
@@ -271,15 +352,26 @@ module Rack
       end
 
       def ip
-        remote_addrs = split_ip_addresses(get_header('REMOTE_ADDR'))
-        remote_addrs = reject_trusted_ip_addresses(remote_addrs)
+        remote_addresses = split_header(get_header('REMOTE_ADDR'))
+        external_addresses = reject_trusted_ip_addresses(remote_addresses)
 
-        return remote_addrs.first if remote_addrs.any?
+        unless external_addresses.empty?
+          return external_addresses.first
+        end
 
-        forwarded_ips = split_ip_addresses(get_header('HTTP_X_FORWARDED_FOR'))
-          .map { |ip| strip_port(ip) }
+        if forwarded_for = self.forwarded_for
+          unless forwarded_for.empty?
+            # The forwarded for addresses are ordered: client, proxy1, proxy2.
+            # So we reject all the trusted addresses (proxy*) and return the
+            # last client. Or if we trust everyone, we just return the first
+            # address.
+            return reject_trusted_ip_addresses(forwarded_for).last || forwarded_for.first
+          end
+        end
 
-        return reject_trusted_ip_addresses(forwarded_ips).last || forwarded_ips.first || get_header("REMOTE_ADDR")
+        # If all the addresses are trusted, and we aren't forwarded, just return
+        # the first remote address, which represents the source of the request.
+        remote_addresses.first
       end
 
       # The media type (type/subtype) portion of the CONTENT_TYPE header
@@ -320,6 +412,7 @@ module Rack
       def form_data?
         type = media_type
         meth = get_header(RACK_METHODOVERRIDE_ORIGINAL_METHOD) || get_header(REQUEST_METHOD)
+
         (meth == POST && type.nil?) || FORM_DATA_MEDIA_TYPES.include?(type)
       end
 
@@ -334,7 +427,7 @@ module Rack
         if get_header(RACK_REQUEST_QUERY_STRING) == query_string
           get_header(RACK_REQUEST_QUERY_HASH)
         else
-          query_hash = parse_query(query_string, '&;')
+          query_hash = parse_query(query_string, '&')
           set_header(RACK_REQUEST_QUERY_STRING, query_string)
           set_header(RACK_REQUEST_QUERY_HASH, query_hash)
         end
@@ -374,8 +467,6 @@ module Rack
       # Note that modifications will not be persisted in the env. Use update_param or delete_param if you want to destructively modify params.
       def params
         self.GET.merge(self.POST)
-      rescue EOFError
-        self.GET.dup
       end
 
       # Destructively update a parameter, whether it's in GET and/or POST. Returns nil.
@@ -439,9 +530,7 @@ module Rack
 
       # shortcut for <tt>request.params[key]</tt>
       def [](key)
-        if $VERBOSE
-          warn("Request#[] is deprecated and will be removed in a future version of Rack. Please use request.params[] instead")
-        end
+        warn("Request#[] is deprecated and will be removed in a future version of Rack. Please use request.params[] instead", uplevel: 1)
 
         params[key.to_s]
       end
@@ -450,9 +539,7 @@ module Rack
       #
       # Note that modifications will not be persisted in the env. Use update_param or delete_param if you want to destructively modify params.
       def []=(key, value)
-        if $VERBOSE
-          warn("Request#[]= is deprecated and will be removed in a future version of Rack. Please use request.params[]= instead")
-        end
+        warn("Request#[]= is deprecated and will be removed in a future version of Rack. Please use request.params[]= instead", uplevel: 1)
 
         params[key.to_s] = value
       end
@@ -465,6 +552,20 @@ module Rack
       private
 
       def default_session; {}; end
+
+      # Assist with compatibility when processing `X-Forwarded-For`.
+      def wrap_ipv6(host)
+        # Even thought IPv6 addresses should be wrapped in square brackets,
+        # sometimes this is not done in various legacy/underspecified headers.
+        # So we try to fix this situation for compatibility reasons.
+
+        # Try to detect IPv6 addresses which aren't escaped yet:
+        if !host.start_with?('[') && host.count(':') > 1
+          "[#{host}]"
+        else
+          host
+        end
+      end
 
       def parse_http_accept_header(header)
         header.to_s.split(/\s*,\s*/).map do |part|
@@ -489,37 +590,33 @@ module Rack
         Rack::Multipart.extract_multipart(self, query_parser)
       end
 
-      def split_ip_addresses(ip_addresses)
-        ip_addresses ? ip_addresses.strip.split(/[,\s]+/) : []
+      def split_header(value)
+        value ? value.strip.split(/[,\s]+/) : []
       end
 
-      def hostname
-        if forwarded = get_header(HTTP_X_FORWARDED_HOST)
-          forwarded.split(/,\s?/).last
-        else
-          get_header(HTTP_HOST) ||
-            get_header(SERVER_NAME) ||
-            get_header(SERVER_ADDR)
-        end
-      end
+      AUTHORITY = /
+        \A
+        (?<host>
+          # Match IPv6 as a string of hex digits and colons in square brackets
+          \[(?<address>(?<ipv6>.*))\]
+          |
+          # Match IPv4 as four dot-separated groups of digits
+          (?<address>(?<ipv4>[\d.]{7,}))
+          |
+          # Match any other string as a hostname
+          (?<address>(?<hostname>.*?))
+        )
+        (:(?<port>\d+))?
+        \Z
+      /x
 
-      def strip_port(ip_address)
-        # IPv6 format with optional port: "[2001:db8:cafe::17]:47011"
-        # returns: "2001:db8:cafe::17"
-        sep_start = ip_address.index('[')
-        sep_end = ip_address.index(']')
-        if (sep_start && sep_end)
-          return ip_address[sep_start + 1, sep_end - 1]
-        end
+      private_constant :AUTHORITY
 
-        # IPv4 format with optional port: "192.0.2.43:47011"
-        # returns: "192.0.2.43"
-        sep = ip_address.index(':')
-        if (sep && ip_address.count(':') == 1)
-          return ip_address[0, sep]
-        end
+      def split_authority(authority)
+        return [] if authority.nil?
 
-        ip_address
+        match = AUTHORITY.match(authority)
+        return match[:host], match[:address], match[:port]&.to_i
       end
 
       def reject_trusted_ip_addresses(ip_addresses)
@@ -542,24 +639,6 @@ module Rack
           else
             header
           end
-        end
-      end
-
-      def extract_port(uri)
-        # IPv6 format with optional port: "[2001:db8:cafe::17]:47011"
-        # change `uri` to ":47011"
-        sep_start = uri.index('[')
-        sep_end = uri.index(']')
-        if (sep_start && sep_end)
-          uri = uri[sep_end + 1, uri.length]
-        end
-
-        # IPv4 format with optional port: "192.0.2.43:47011"
-        # or ":47011" from IPv6 above
-        # returns: "47011"
-        sep = uri.index(':')
-        if (sep && uri.count(':') == 1)
-          return uri[sep + 1, uri.length]
         end
       end
     end

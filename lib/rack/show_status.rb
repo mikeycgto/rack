@@ -18,24 +18,30 @@ module Rack
 
     def call(env)
       status, headers, body = @app.call(env)
-      headers = Utils::HeaderHash.new(headers)
+      headers = Utils::HeaderHash[headers]
       empty = headers[CONTENT_LENGTH].to_i <= 0
 
       # client or server error, or explicit message
       if (status.to_i >= 400 && empty) || env[RACK_SHOWSTATUS_DETAIL]
-        # This double assignment is to prevent an "unused variable" warning on
-        # Ruby 1.9.3.  Yes, it is dumb, but I don't like Ruby yelling at me.
+        # This double assignment is to prevent an "unused variable" warning.
+        # Yes, it is dumb, but I don't like Ruby yelling at me.
         req = req = Rack::Request.new(env)
 
         message = Rack::Utils::HTTP_STATUS_CODES[status.to_i] || status.to_s
 
-        # This double assignment is to prevent an "unused variable" warning on
-        # Ruby 1.9.3.  Yes, it is dumb, but I don't like Ruby yelling at me.
+        # This double assignment is to prevent an "unused variable" warning.
+        # Yes, it is dumb, but I don't like Ruby yelling at me.
         detail = detail = env[RACK_SHOWSTATUS_DETAIL] || message
 
-        body = @template.result(binding)
-        size = body.bytesize
-        [status, headers.merge(CONTENT_TYPE => "text/html", CONTENT_LENGTH => size.to_s), [body]]
+        html = @template.result(binding)
+        size = html.bytesize
+
+        original_body = body
+        body = Rack::BodyProxy.new([html]) do
+          original_body.close if original_body.respond_to?(:close)
+        end
+
+        [status, headers.merge(CONTENT_TYPE => "text/html", CONTENT_LENGTH => size.to_s), body]
       else
         [status, headers, body]
       end

@@ -13,14 +13,15 @@
 
 module Rack
   # The Rack protocol version number implemented.
-  VERSION = [1, 3]
+  VERSION = [1, 3].freeze
+  VERSION_STRING = VERSION.join(".").freeze
 
   # Return the Rack protocol version as a dotted string.
   def self.version
-    VERSION.join(".")
+    VERSION_STRING
   end
 
-  RELEASE = "2.2.0"
+  RELEASE = "2.3.0"
 
   # Return the Rack release as a dotted string.
   def self.release

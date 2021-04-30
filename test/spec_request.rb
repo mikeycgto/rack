@@ -114,32 +114,67 @@ class RackRequestTest < Minitest::Spec
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "www2.example.org")
     req.host.must_equal "www2.example.org"
+    req.hostname.must_equal "www2.example.org"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "123foo.example.com")
+    req.host.must_equal "123foo.example.com"
+    req.hostname.must_equal "123foo.example.com"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "♡.com")
+    req.host.must_equal "♡.com"
+    req.hostname.must_equal "♡.com"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "♡.com:80")
+    req.host.must_equal "♡.com"
+    req.hostname.must_equal "♡.com"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "nic.谷歌")
+    req.host.must_equal "nic.谷歌"
+    req.hostname.must_equal "nic.谷歌"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "nic.谷歌:80")
+    req.host.must_equal "nic.谷歌"
+    req.hostname.must_equal "nic.谷歌"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "technically_invalid.example.com")
+    req.host.must_equal "technically_invalid.example.com"
+    req.hostname.must_equal "technically_invalid.example.com"
+
+    req = make_request \
+      Rack::MockRequest.env_for("/", "HTTP_HOST" => "technically_invalid.example.com:80")
+    req.host.must_equal "technically_invalid.example.com"
+    req.hostname.must_equal "technically_invalid.example.com"
 
     req = make_request \
       Rack::MockRequest.env_for("/", "SERVER_NAME" => "example.org", "SERVER_PORT" => "9292")
     req.host.must_equal "example.org"
+    req.hostname.must_equal "example.org"
 
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "example.org:9292")
     req.host.must_equal "example.org"
+    req.hostname.must_equal "example.org"
 
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "[2001:db8:cafe::17]:47011")
-    req.host.must_equal "2001:db8:cafe::17"
+    req.host.must_equal "[2001:db8:cafe::17]"
+    req.hostname.must_equal "2001:db8:cafe::17"
 
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "2001:db8:cafe::17")
-    req.host.must_equal "2001:db8:cafe::17"
-
-    env = Rack::MockRequest.env_for("/", "SERVER_ADDR" => "192.168.1.1", "SERVER_PORT" => "9292")
-    env.delete("SERVER_NAME")
-    req = make_request(env)
-    req.host.must_equal "192.168.1.1"
+    req.host.must_equal "[2001:db8:cafe::17]"
+    req.hostname.must_equal "2001:db8:cafe::17"
 
     env = Rack::MockRequest.env_for("/")
     env.delete("SERVER_NAME")
     req = make_request(env)
-    req.host.must_equal ""
+    req.host.must_be_nil
   end
 
   it "figure out the correct port" do
@@ -175,7 +210,7 @@ class RackRequestTest < Minitest::Spec
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "example.org", "HTTP_X_FORWARDED_SSL" => "on")
     req.port.must_equal 443
 
-     req = make_request \
+    req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "example.org", "HTTP_X_FORWARDED_PROTO" => "https")
     req.port.must_equal 443
 
@@ -214,7 +249,7 @@ class RackRequestTest < Minitest::Spec
     req.host_with_port.must_equal "example.org:9292"
 
     req = make_request \
-      Rack::MockRequest.env_for("/", "SERVER_NAME" => "example.org", "SERVER_PORT" => "")
+      Rack::MockRequest.env_for("/", "SERVER_NAME" => "example.org")
     req.host_with_port.must_equal "example.org"
 
     req = make_request \
@@ -227,7 +262,7 @@ class RackRequestTest < Minitest::Spec
 
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "2001:db8:cafe::17")
-    req.host_with_port.must_equal "2001:db8:cafe::17"
+    req.host_with_port.must_equal "[2001:db8:cafe::17]"
 
     req = make_request \
       Rack::MockRequest.env_for("/", "HTTP_HOST" => "localhost:81", "HTTP_X_FORWARDED_HOST" => "example.org", "SERVER_PORT" => "9393")
@@ -273,12 +308,12 @@ class RackRequestTest < Minitest::Spec
     req.params[:quux].must_equal "bla"
   end
 
-  it "use semi-colons as separators for query strings in GET" do
+  it "does not use semi-colons as separators for query strings in GET" do
     req = make_request(Rack::MockRequest.env_for("/?foo=bar&quux=b;la;wun=duh"))
     req.query_string.must_equal "foo=bar&quux=b;la;wun=duh"
-    req.GET.must_equal "foo" => "bar", "quux" => "b", "la" => nil, "wun" => "duh"
+    req.GET.must_equal "foo" => "bar", "quux" => "b;la;wun=duh"
     req.POST.must_be :empty?
-    req.params.must_equal "foo" => "bar", "quux" => "b", "la" => nil, "wun" => "duh"
+    req.params.must_equal "foo" => "bar", "quux" => "b;la;wun=duh"
   end
 
   it "limit the keys from the GET query string" do
@@ -308,14 +343,14 @@ class RackRequestTest < Minitest::Spec
   end
 
   it "limit the allowed parameter depth when parsing parameters" do
-    env = Rack::MockRequest.env_for("/?a#{'[a]' * 110}=b")
+    env = Rack::MockRequest.env_for("/?a#{'[a]' * 40}=b")
     req = make_request(env)
     lambda { req.GET }.must_raise RangeError
 
-    env = Rack::MockRequest.env_for("/?a#{'[a]' * 90}=b")
+    env = Rack::MockRequest.env_for("/?a#{'[a]' * 30}=b")
     req = make_request(env)
     params = req.GET
-    90.times { params = params['a'] }
+    30.times { params = params['a'] }
     params['a'].must_equal 'b'
 
     old, Rack::Utils.param_depth_limit = Rack::Utils.param_depth_limit, 3
@@ -485,32 +520,24 @@ class RackRequestTest < Minitest::Spec
     req.POST.must_equal "foo" => "bar", "quux" => "bla"
   end
 
-  it "have params only return GET if POST cannot be processed" do
-    obj = Object.new
-    def obj.read(*) raise EOFError end
-    def obj.set_encoding(*) end
-    def obj.rewind(*) end
-    req = make_request Rack::MockRequest.env_for("/", 'REQUEST_METHOD' => 'POST', :input => obj)
-    req.params.must_equal req.GET
-    req.params.wont_be_same_as req.GET
-  end
-
   it "get value by key from params with #[]" do
     req = make_request \
       Rack::MockRequest.env_for("?foo=quux")
-    req['foo'].must_equal 'quux'
-    req[:foo].must_equal 'quux'
+    assert_output(nil, /deprecated/) do
+      req['foo'].must_equal 'quux'
+      req[:foo].must_equal 'quux'
+    end
 
     next if self.class == TestProxyRequest
     verbose = $VERBOSE
     warn_arg = nil
-    req.define_singleton_method(:warn) do |arg|
-      warn_arg = arg
+    req.define_singleton_method(:warn) do |*args|
+      warn_arg = args
     end
     begin
       $VERBOSE = true
       req['foo'].must_equal 'quux'
-      warn_arg.must_equal "Request#[] is deprecated and will be removed in a future version of Rack. Please use request.params[] instead"
+      warn_arg.must_equal ["Request#[] is deprecated and will be removed in a future version of Rack. Please use request.params[] instead", { uplevel: 1 }]
     ensure
       $VERBOSE = verbose
     end
@@ -519,33 +546,43 @@ class RackRequestTest < Minitest::Spec
   it "set value to key on params with #[]=" do
     req = make_request \
       Rack::MockRequest.env_for("?foo=duh")
-    req['foo'].must_equal 'duh'
-    req[:foo].must_equal 'duh'
+    assert_output(nil, /deprecated/) do
+      req['foo'].must_equal 'duh'
+      req[:foo].must_equal 'duh'
+    end
     req.params.must_equal 'foo' => 'duh'
 
     if req.delegate?
       skip "delegate requests don't cache params, so mutations have no impact"
     end
 
-    req['foo'] = 'bar'
+    assert_output(nil, /deprecated/) do
+      req['foo'] = 'bar'
+    end
     req.params.must_equal 'foo' => 'bar'
-    req['foo'].must_equal 'bar'
-    req[:foo].must_equal 'bar'
+    assert_output(nil, /deprecated/) do
+      req['foo'].must_equal 'bar'
+      req[:foo].must_equal 'bar'
+    end
 
-    req[:foo] = 'jaz'
+    assert_output(nil, /deprecated/) do
+      req[:foo] = 'jaz'
+    end
     req.params.must_equal 'foo' => 'jaz'
-    req['foo'].must_equal 'jaz'
-    req[:foo].must_equal 'jaz'
+    assert_output(nil, /deprecated/) do
+      req['foo'].must_equal 'jaz'
+      req[:foo].must_equal 'jaz'
+    end
 
     verbose = $VERBOSE
     warn_arg = nil
-    req.define_singleton_method(:warn) do |arg|
-      warn_arg = arg
+    req.define_singleton_method(:warn) do |*args|
+      warn_arg = args
     end
     begin
       $VERBOSE = true
       req['foo'] = 'quux'
-      warn_arg.must_equal "Request#[]= is deprecated and will be removed in a future version of Rack. Please use request.params[]= instead"
+      warn_arg.must_equal ["Request#[]= is deprecated and will be removed in a future version of Rack. Please use request.params[]= instead", { uplevel: 1 }]
       req.params['foo'].must_equal 'quux'
     ensure
       $VERBOSE = verbose
@@ -630,6 +667,14 @@ class RackRequestTest < Minitest::Spec
     request.scheme.must_equal "http"
     request.wont_be :ssl?
 
+    request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_SCHEME' => 'ws'))
+    request.scheme.must_equal "ws"
+    request.wont_be :ssl?
+
+    request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_PROTO' => 'ws'))
+    request.scheme.must_equal "ws"
+    request.wont_be :ssl?
+
     request = make_request(Rack::MockRequest.env_for("/", 'HTTPS' => 'on'))
     request.scheme.must_equal "https"
     request.must_be :ssl?
@@ -658,12 +703,20 @@ class RackRequestTest < Minitest::Spec
     request.scheme.must_equal "https"
     request.must_be :ssl?
 
+    request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_SCHEME' => 'wss'))
+    request.scheme.must_equal "wss"
+    request.must_be :ssl?
+
     request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_PROTO' => 'https'))
     request.scheme.must_equal "https"
     request.must_be :ssl?
 
     request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_PROTO' => 'https, http, http'))
     request.scheme.must_equal "https"
+    request.must_be :ssl?
+
+    request = make_request(Rack::MockRequest.env_for("/", 'HTTP_X_FORWARDED_PROTO' => 'wss'))
+    request.scheme.must_equal "wss"
     request.must_be :ssl?
   end
 
@@ -1280,6 +1333,12 @@ EOF
 
     res = mock.get '/', 'REMOTE_ADDR' => '1.2.3.4,3.4.5.6'
     res.body.must_equal '1.2.3.4'
+
+    res = mock.get '/', 'REMOTE_ADDR' => '127.0.0.1'
+    res.body.must_equal '127.0.0.1'
+
+    res = mock.get '/', 'REMOTE_ADDR' => '127.0.0.1,127.0.0.1'
+    res.body.must_equal '127.0.0.1'
   end
 
   it 'deals with proxies' do

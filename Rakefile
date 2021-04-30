@@ -21,7 +21,7 @@ end
 desc "Make an archive as .tar.gz"
 task dist: %w[chmod changelog spec rdoc] do
   sh "git archive --format=tar --prefix=#{release}/ HEAD^{tree} >#{release}.tar"
-  sh "pax -waf #{release}.tar -s ':^:#{release}/:' SPEC ChangeLog doc rack.gemspec"
+  sh "pax -waf #{release}.tar -s ':^:#{release}/:' SPEC.rdoc ChangeLog doc rack.gemspec"
   sh "gzip -f -9 #{release}.tar"
 end
 
@@ -39,7 +39,7 @@ task officialrelease_really: %w[spec dist gem] do
 end
 
 def release
-  "rack-" + File.read('lib/rack.rb')[/RELEASE += +([\"\'])([\d][\w\.]+)\1/, 2]
+  "rack-" + File.read('lib/rack/version.rb')[/RELEASE += +([\"\'])([\d][\w\.]+)\1/, 2]
 end
 
 desc "Make binaries executable"
@@ -72,13 +72,13 @@ file "ChangeLog" => '.git/index' do
 end
 
 desc "Generate Rack Specification"
-task spec: "SPEC"
+task spec: "SPEC.rdoc"
 
 file 'lib/rack/lint.rb'
-file "SPEC" => 'lib/rack/lint.rb' do
-  File.open("SPEC", "wb") { |file|
+file "SPEC.rdoc" => 'lib/rack/lint.rb' do
+  File.open("SPEC.rdoc", "wb") { |file|
     IO.foreach("lib/rack/lint.rb") { |line|
-      if line =~ /## (.*)/
+      if line =~ /^\s*## ?(.*)/
         file.puts $1
       end
     }
@@ -114,7 +114,7 @@ desc "Generate RDoc documentation"
 task rdoc: %w[changelog spec] do
   sh(*%w{rdoc --line-numbers --main README.rdoc
               --title 'Rack\ Documentation' --charset utf-8 -U -o doc} +
-              %w{README.rdoc KNOWN-ISSUES SPEC ChangeLog} +
+              %w{README.rdoc KNOWN-ISSUES SPEC.rdoc ChangeLog} +
               `git ls-files lib/\*\*/\*.rb`.strip.split)
   cp "contrib/rdoc.css", "doc/rdoc.css"
 end
@@ -127,4 +127,30 @@ task pushsite: :pushdoc do
   sh "cd site && git gc"
   sh "rsync -avz site/ rack.rubyforge.org:/var/www/gforge-projects/rack/"
   sh "cd site && git push"
+end
+
+def clone_and_test(url, name, command)
+  path = "external/#{name}"
+  FileUtils.rm_rf path
+  FileUtils.mkdir_p path
+
+  sh("git clone #{url} #{path}")
+
+  # I tried using `bundle config --local local.async ../` but it simply doesn't work.
+  File.open("#{path}/Gemfile", "a") do |file|
+    file.puts("gem 'rack', path: '../../'")
+  end
+
+  sh("cd #{path} && bundle install && #{command}")
+end
+
+task :external do
+  # In order not to interfere with external tests: rename our config file
+  FileUtils.mv ".rubocop.yml", ".rack.rubocop.yml.disabled"
+
+  Bundler.with_clean_env do
+    clone_and_test("https://github.com/rack/rack-attack", "rack-attack", "bundle exec rake test")
+    clone_and_test("https://github.com/rtomayko/rack-cache", "rack-cache", "bundle exec rake")
+    clone_and_test("https://github.com/socketry/falcon", "falcon", "bundle exec rspec")
+  end
 end

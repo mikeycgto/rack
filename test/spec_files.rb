@@ -23,6 +23,14 @@ describe Rack::Files do
     assert_equal 200, status
   end
 
+  it 'raises if you attempt to define response_body in subclass' do
+    c = Class.new(Rack::Files)
+
+    lambda do
+      c.send(:define_method, :response_body){}
+    end.must_raise RuntimeError
+  end
+
   it 'serves files with + in the file name' do
     Dir.mktmpdir do |dir|
       File.write File.join(dir, "you+me.txt"), "hello world"
@@ -183,8 +191,8 @@ describe Rack::Files do
 
     res.status.must_equal 206
     res["Content-Length"].must_equal "12"
-    res["Content-Range"].must_equal "bytes 22-33/208"
-    res.body.must_equal "frozen_strin"
+    res["Content-Range"].must_equal "bytes 22-33/209"
+    res.body.must_equal "IS FILE! ***"
   end
 
   it "return correct multiple byte ranges in body" do
@@ -199,14 +207,14 @@ describe Rack::Files do
 \r
 --AaB03x\r
 Content-Type: text/plain\r
-Content-Range: bytes 22-33/208\r
+Content-Range: bytes 22-33/209\r
 \r
-frozen_strin\r
+IS FILE! ***\r
 --AaB03x\r
 Content-Type: text/plain\r
-Content-Range: bytes 60-80/208\r
+Content-Range: bytes 60-80/209\r
 \r
-e.join(File.dirname(_\r
+, tests will break!!!\r
 --AaB03x--\r
     EOF
 
@@ -219,7 +227,7 @@ e.join(File.dirname(_\r
     res = Rack::MockResponse.new(*files(DOCROOT).call(env))
 
     res.status.must_equal 416
-    res["Content-Range"].must_equal "bytes */208"
+    res["Content-Range"].must_equal "bytes */209"
   end
 
   it "support custom http headers" do
@@ -271,7 +279,7 @@ e.join(File.dirname(_\r
     req = Rack::MockRequest.new(Rack::Lint.new(Rack::Files.new(DOCROOT)))
     res = req.head "/cgi/test"
     res.must_be :successful?
-    res['Content-Length'].must_equal "208"
+    res['Content-Length'].must_equal "209"
   end
 
   it "default to a mime type of text/plain" do
@@ -300,18 +308,4 @@ e.join(File.dirname(_\r
     res.must_be :not_found?
     res.body.must_be :empty?
   end
-
-  class MyFile < Rack::File
-    def response_body
-      "hello world"
-    end
-  end
-
-  it "behaves gracefully if response_body is present" do
-    file = Rack::Lint.new MyFile.new(DOCROOT)
-    res  = Rack::MockRequest.new(file).get("/cgi/test")
-
-    res.must_be :ok?
-  end
-
 end

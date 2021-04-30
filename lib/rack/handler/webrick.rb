@@ -37,7 +37,7 @@ module Rack
 
         @server = ::WEBrick::HTTPServer.new(options)
         @server.mount "/", Rack::Handler::WEBrick, app
-        yield @server  if block_given?
+        yield @server if block_given?
         @server.start
       end
 
@@ -52,8 +52,10 @@ module Rack
       end
 
       def self.shutdown
-        @server.shutdown
-        @server = nil
+        if @server
+          @server.shutdown
+          @server = nil
+        end
       end
 
       def initialize(server, app)
@@ -82,7 +84,6 @@ module Rack
           RACK_HIJACK_IO    => nil
         )
 
-        env[HTTP_VERSION] ||= env[SERVER_PROTOCOL]
         env[QUERY_STRING] ||= ""
         unless env[PATH_INFO] == ""
           path, n = req.request_uri.path, env[SCRIPT_NAME].length

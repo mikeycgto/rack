@@ -41,7 +41,7 @@ module Rack
     # Providing a body which responds to #to_str is legacy behaviour.
     def initialize(body = nil, status = 200, headers = {})
       @status = status.to_i
-      @headers = Utils::HeaderHash.new(headers)
+      @headers = Utils::HeaderHash[headers]
 
       @writer = self.method(:append)
 
@@ -78,17 +78,17 @@ module Rack
     # @return [Array] a 3-tuple suitable of `[status, headers, body]`
     # which is suitable to be returned from the middleware `#call(env)` method.
     def finish(&block)
-      if STATUS_WITH_NO_ENTITY_BODY[status.to_i]
+      if STATUS_WITH_NO_ENTITY_BODY[@status]
         delete_header CONTENT_TYPE
         delete_header CONTENT_LENGTH
         close
-        [status.to_i, header, []]
+        return [@status, @headers, []]
       else
         if block_given?
           @block = block
-          [status.to_i, header, self]
+          return [@status, @headers, self]
         else
-          [status.to_i, header, @body]
+          return [@status, @headers, @body]
         end
       end
     end
@@ -168,7 +168,7 @@ module Rack
       #   assert_equal 'Accept-Encoding,Cookie', response.get_header('Vary')
       #
       # http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
-      def add_header key, v
+      def add_header(key, v)
         if v.nil?
           get_header key
         elsif has_header? key
@@ -178,8 +178,14 @@ module Rack
         end
       end
 
+      # Get the content type of the response.
       def content_type
         get_header CONTENT_TYPE
+      end
+
+      # Set the content type of the response.
+      def content_type=(content_type)
+        set_header CONTENT_TYPE, content_type
       end
 
       def media_type
@@ -216,7 +222,7 @@ module Rack
         get_header SET_COOKIE
       end
 
-      def set_cookie_header= v
+      def set_cookie_header=(v)
         set_header SET_COOKIE, v
       end
 
@@ -224,15 +230,31 @@ module Rack
         get_header CACHE_CONTROL
       end
 
-      def cache_control= v
+      def cache_control=(v)
         set_header CACHE_CONTROL, v
+      end
+
+      # Specifies that the content shouldn't be cached. Overrides `cache!` if already called.
+      def do_not_cache!
+        set_header CACHE_CONTROL, "no-cache, must-revalidate"
+        set_header EXPIRES, Time.now.httpdate
+      end
+
+      # Specify that the content should be cached.
+      # @param duration [Integer] The number of seconds until the cache expires.
+      # @option directive [String] The cache control directive, one of "public", "private", "no-cache" or "no-store".
+      def cache!(duration = 3600, directive: "public")
+        unless headers[CACHE_CONTROL] =~ /no-cache/
+          set_header CACHE_CONTROL, "#{directive}, max-age=#{duration}"
+          set_header EXPIRES, (Time.now + duration).httpdate
+        end
       end
 
       def etag
         get_header ETAG
       end
 
-      def etag= v
+      def etag=(v)
         set_header ETAG, v
       end
 
@@ -282,7 +304,7 @@ module Rack
       attr_reader :headers
       attr_accessor :status
 
-      def initialize status, headers
+      def initialize(status, headers)
         @status = status
         @headers = headers
       end

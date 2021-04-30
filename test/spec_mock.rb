@@ -319,9 +319,30 @@ describe Rack::MockResponse do
     secure_cookie.expires.must_be_nil
   end
 
+  it "parses cookie headers with equals sign at the end" do
+    res = Rack::MockRequest.new(->(env) { [200, { "Set-Cookie" => "__cf_bm=_somebase64encodedstringwithequalsatthened=; array=awesome" }, [""]] }).get("")
+    cookie = res.cookie("__cf_bm")
+    cookie.value[0].must_equal "_somebase64encodedstringwithequalsatthened="
+  end
+
   it "return nil if a non existent cookie is requested" do
     res = Rack::MockRequest.new(app).get("")
     res.cookie("i_dont_exist").must_be_nil
+  end
+
+  it "parses cookie headers provided as an array" do
+    res = Rack::MockRequest.new(->(env) { [200, [["set-cookie", "array=awesome"]], [""]] }).get("")
+    array_cookie = res.cookie("array")
+    array_cookie.value[0].must_equal "awesome"
+  end
+
+  it "parses multiple set-cookie headers provided as an array" do
+    cookie_headers = [["set-cookie", "array=awesome\nmultiple=times"]]
+    res = Rack::MockRequest.new(->(env) { [200, cookie_headers, [""]] }).get("")
+    array_cookie = res.cookie("array")
+    array_cookie.value[0].must_equal "awesome"
+    second_cookie = res.cookie("multiple")
+    second_cookie.value[0].must_equal "times"
   end
 
   it "provide access to the HTTP body" do
@@ -338,6 +359,12 @@ describe Rack::MockResponse do
     res.must_be :ok?
     res.errors.wont_be :empty?
     res.errors.must_include "foo"
+  end
+
+  it "handle enumerable headers that are not a hash" do
+    # this is exactly what rack-test does
+    res = Rack::MockResponse.new(200, [], [])
+    res.cookies.must_equal({})
   end
 
   it "allow calling body.close afterwards" do

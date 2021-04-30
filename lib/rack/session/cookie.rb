@@ -4,6 +4,7 @@ require_relative 'abstract/id'
 require_relative '../encryptor'
 
 require 'base64'
+require 'delegate'
 require 'json'
 require 'openssl'
 require 'zlib'
@@ -163,7 +164,7 @@ module Rack
 
         # If a legacy HMAC secret is present, initialize those features
         if options.has_key?(:legacy_hmac_secret)
-          @legacy_hmac = options.fetch(:legacy_hmac, OpenSSL::Digest::SHA1)
+          @legacy_hmac = options.fetch(:legacy_hmac, 'SHA1')
 
           @legacy_hmac_secret = options[:legacy_hmac_secret]
           @legacy_hmac_coder  = options.fetch(:legacy_hmac_coder, Base64::Marshal.new)
@@ -275,7 +276,7 @@ module Rack
       end
 
       def legacy_generate_hmac(data)
-        OpenSSL::HMAC.hexdigest(@legacy_hmac.new, @legacy_hmac_secret, data)
+        OpenSSL::HMAC.hexdigest(@legacy_hmac, @legacy_hmac_secret, data)
       end
 
       def encode_session_data(session)

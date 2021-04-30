@@ -2,7 +2,7 @@
 
 {<img src="https://rack.github.io/logo.png" width="400" alt="rack powers web applications" />}[https://rack.github.io/]
 
-{<img src="https://circleci.com/gh/rack/rack.svg?style=svg" alt="CircleCI" />}[https://circleci.com/gh/rack/rack]
+{<img src="https://github.com/rack/rack/workflows/Development/badge.svg" alt="GitHub Actions status" />}[https://github.com/rack/rack/actions?query=workflow%3ADevelopment]
 {<img src="https://badge.fury.io/rb/rack.svg" alt="Gem Version" />}[http://badge.fury.io/rb/rack]
 {<img src="https://api.dependabot.com/badges/compatibility_score?dependency-name=rack&package-manager=bundler&version-scheme=semver" alt="SemVer Stability" />}[https://dependabot.com/compatibility-score.html?dependency-name=rack&package-manager=bundler&version-scheme=semver]
 {<img src="http://inch-ci.org/github/rack/rack.svg?branch=master" alt="Inline docs" />}[http://inch-ci.org/github/rack/rack]
@@ -13,7 +13,7 @@ the simplest way possible, it unifies and distills the API for web
 servers, web frameworks, and software in between (the so-called
 middleware) into a single method call.
 
-The exact details of this are described in the \Rack specification,
+The exact details of this are described in the {\Rack specification}[https://github.com/rack/rack/blob/master/SPEC.rdoc],
 which all \Rack applications should conform to.
 
 == Supported web servers
@@ -200,7 +200,7 @@ but this query string would not be allowed:
 
 Limiting the depth prevents a possible stack overflow when parsing parameters.
 
-Defaults to 100.
+Defaults to 32.
 
 === multipart_part_limit
 

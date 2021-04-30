@@ -6,6 +6,10 @@ module Rack
   module Multipart
     class MultipartPartLimitError < Errno::EMFILE; end
 
+    # Use specific error class when parsing multipart request
+    # that ends early.
+    class EmptyContentError < ::EOFError; end
+
     class Parser
       (require_relative '../core_ext/regexp'; using ::Rack::RegexpExtensions) if RUBY_VERSION < '2.4'
 
@@ -67,15 +71,9 @@ module Rack
         return EMPTY unless boundary
 
         io = BoundedIO.new(io, content_length) if content_length
-        outbuf = String.new
 
         parser = new(boundary, tmpfile, bufsize, qp)
-        parser.on_read io.read(bufsize, outbuf)
-
-        loop do
-          break if parser.state == :DONE
-          parser.on_read io.read(bufsize, outbuf)
-        end
+        parser.parse(io)
 
         io.rewind
         parser.result
@@ -117,7 +115,7 @@ module Rack
 
         include Enumerable
 
-        def initialize tempfile
+        def initialize(tempfile)
           @tempfile = tempfile
           @mime_parts = []
           @open_files = 0
@@ -127,7 +125,7 @@ module Rack
           @mime_parts.each { |part| yield part }
         end
 
-        def on_mime_head mime_index, head, filename, content_type, name
+        def on_mime_head(mime_index, head, filename, content_type, name)
           if filename
             body = @tempfile.call(filename, content_type)
             body.binmode if body.respond_to?(:binmode)
@@ -143,11 +141,11 @@ module Rack
           check_open_files
         end
 
-        def on_mime_body mime_index, content
+        def on_mime_body(mime_index, content)
           @mime_parts[mime_index].body << content
         end
 
-        def on_mime_finish mime_index
+        def on_mime_finish(mime_index)
         end
 
         private
@@ -182,10 +180,27 @@ module Rack
         @head_regex = /(.*?#{EOL})#{EOL}/m
       end
 
-      def on_read content
-        handle_empty_content!(content)
-        @sbuf.concat content
-        run_parser
+      def parse(io)
+        outbuf = String.new
+        read_data(io, outbuf)
+
+        loop do
+          status =
+            case @state
+            when :FAST_FORWARD
+              handle_fast_forward
+            when :CONSUME_TOKEN
+              handle_consume_token
+            when :MIME_HEAD
+              handle_mime_head
+            when :MIME_BODY
+              handle_mime_body
+            when :DONE
+              return
+            end
+
+          read_data(io, outbuf) if status == :want_read
+        end
       end
 
       def result
@@ -200,21 +215,10 @@ module Rack
 
       private
 
-      def run_parser
-        loop do
-          case @state
-          when :FAST_FORWARD
-            break if handle_fast_forward == :want_read
-          when :CONSUME_TOKEN
-            break if handle_consume_token == :want_read
-          when :MIME_HEAD
-            break if handle_mime_head == :want_read
-          when :MIME_BODY
-            break if handle_mime_body == :want_read
-          when :DONE
-            break
-          end
-        end
+      def read_data(io, outbuf)
+        content = io.read(@bufsize, outbuf)
+        handle_empty_content!(content)
+        @sbuf.concat(content)
       end
 
       def handle_fast_forward
@@ -356,7 +360,7 @@ module Rack
 
       def handle_empty_content!(content)
         if content.nil? || content.empty?
-          raise EOFError
+          raise EmptyContentError
         end
       end
     end

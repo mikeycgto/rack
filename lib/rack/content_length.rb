@@ -2,7 +2,10 @@
 
 module Rack
 
-  # Sets the Content-Length header on responses with fixed-length bodies.
+  # Sets the Content-Length header on responses that do not specify
+  # a Content-Length or Transfer-Encoding header.  Note that this
+  # does not fix responses that have an invalid Content-Length
+  # header specified.
   class ContentLength
     include Rack::Utils
 
@@ -12,7 +15,7 @@ module Rack
 
     def call(env)
       status, headers, body = @app.call(env)
-      headers = HeaderHash.new(headers)
+      headers = HeaderHash[headers]
 
       if !STATUS_WITH_NO_ENTITY_BODY.key?(status.to_i) &&
          !headers[CONTENT_LENGTH] &&

@@ -5,18 +5,18 @@ require 'timeout'
 
 describe Rack::Utils do
 
-  def assert_sets exp, act
+  def assert_sets(exp, act)
     exp = Set.new exp.split '&'
     act = Set.new act.split '&'
 
     assert_equal exp, act
   end
 
-  def assert_query exp, act
+  def assert_query(exp, act)
     assert_sets exp, Rack::Utils.build_query(act)
   end
 
-  def assert_nested_query exp, act
+  def assert_nested_query(exp, act)
     assert_sets exp, Rack::Utils.build_nested_query(act)
   end
 
@@ -34,7 +34,7 @@ describe Rack::Utils do
 
   it "round trip binary data" do
     r = [218, 0].pack 'CC'
-      z = Rack::Utils.unescape(Rack::Utils.escape(r), Encoding::BINARY)
+    z = Rack::Utils.unescape(Rack::Utils.escape(r), Encoding::BINARY)
     r.must_equal z
   end
 
@@ -444,6 +444,7 @@ describe Rack::Utils do
 
     helper.call(%w(compress gzip identity), [["compress", 1.0], ["gzip", 1.0]]).must_equal "compress"
     helper.call(%w(compress gzip identity), [["compress", 0.5], ["gzip", 1.0]]).must_equal "gzip"
+    helper.call(%w(compress gzip identity), [["gzip", 1.0], ["compress", 1.0]]).must_equal "compress"
 
     helper.call(%w(foo bar identity), []).must_equal "identity"
     helper.call(%w(foo bar identity), [["*", 1.0]]).must_equal "foo"
@@ -523,6 +524,10 @@ describe Rack::Utils, "cookies" do
 
     env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "foo=bar").freeze
     Rack::Utils.parse_cookies(env).must_equal({ "foo" => "bar" })
+
+    env = Rack::MockRequest.env_for("", "HTTP_COOKIE" => "%66oo=baz;foo=bar")
+    cookies = Rack::Utils.parse_cookies(env)
+    cookies.must_equal({ "%66oo" => "baz", "foo" => "bar" })
   end
 
   it "adds new cookies to nil header" do
@@ -638,6 +643,38 @@ describe Rack::Utils::HeaderHash do
     h.wont_include 'ETag'
   end
 
+  it "fetches values via case-insensitive keys" do
+    h = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
+    v = h.fetch("content-MD5", "nope")
+    v.must_equal "d5ff4e2a0 ..."
+  end
+
+  it "fetches values via case-insensitive keys without defaults" do
+    h = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
+    v = h.fetch("content-MD5")
+    v.must_equal "d5ff4e2a0 ..."
+  end
+
+  it "correctly raises an exception on fetch for a non-existent key" do
+    h = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
+
+    -> { h.fetch("Set-Cookie") }.must_raise(KeyError)
+  end
+
+  it "returns default on fetch miss" do
+    h = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
+
+    v = h.fetch("Missing-Header", "default")
+    v.must_equal "default"
+  end
+
+  it "returns default on fetch miss using block" do
+    h = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
+
+    v = h.fetch("Missing-Header") { |el| "Didn't find #{el}" }
+    v.must_equal "Didn't find Missing-Header"
+  end
+
   it "create deep HeaderHash copy on dup" do
     h1 = Rack::Utils::HeaderHash.new("Content-MD5" => "d5ff4e2a0 ...")
     h2 = h1.dup
@@ -727,14 +764,43 @@ describe Rack::Utils::HeaderHash do
     h['foo'].must_be_nil
     h.wont_include 'foo'
   end
+
+  it "uses memoized header hash" do
+    env = {}
+    headers = Rack::Utils::HeaderHash.new({ 'content-type' => "text/plain", "content-length" => "3" })
+
+    app = lambda do |env|
+      [200, headers, []]
+    end
+
+    app = Rack::ContentLength.new(app)
+
+    response = app.call(env)
+    assert_same response[1], headers
+  end
+
+  it "duplicates header hash" do
+    env = {}
+    headers = Rack::Utils::HeaderHash.new({ 'content-type' => "text/plain", "content-length" => "3" })
+    headers.freeze
+
+    app = lambda do |env|
+      [200, headers, []]
+    end
+
+    app = Rack::ContentLength.new(app)
+
+    response = app.call(env)
+    refute_same response[1], headers
+  end
 end
 
 describe Rack::Utils::Context do
   class ContextTest
     attr_reader :app
-    def initialize app; @app = app; end
-    def call env; context env; end
-    def context env, app = @app; app.call(env); end
+    def initialize(app); @app = app; end
+    def call(env); context env; end
+    def context(env, app = @app); app.call(env); end
   end
   test_target1 = proc{|e| e.to_s + ' world' }
   test_target2 = proc{|e| e.to_i + 2 }

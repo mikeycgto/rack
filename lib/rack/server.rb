@@ -346,9 +346,7 @@ module Rack
           abort "configuration #{options[:config]} not found"
         end
 
-        app, options = Rack::Builder.parse_file(self.options[:config], opt_parser)
-        @options.merge!(options) { |key, old, new| old }
-        app
+        return Rack::Builder.parse_file(self.options[:config])
       end
 
       def handle_profiling(heapfile, profile_mode, filename)
@@ -438,29 +436,23 @@ module Rack
       end
 
       def check_pid!
-        case pidfile_process_status
-        when :running, :not_owned
-          $stderr.puts "A server is already running. Check #{options[:pid]}."
-          exit(1)
-        when :dead
-          ::File.delete(options[:pid])
-        end
-      end
-
-      def pidfile_process_status
-        return :exited unless ::File.exist?(options[:pid])
+        return unless ::File.exist?(options[:pid])
 
         pid = ::File.read(options[:pid]).to_i
-        return :dead if pid == 0
+        raise Errno::ESRCH if pid == 0
 
         Process.kill(0, pid)
-        :running
+        exit_with_pid(pid)
       rescue Errno::ESRCH
-        :dead
+        ::File.delete(options[:pid])
       rescue Errno::EPERM
-        :not_owned
+        exit_with_pid(pid)
       end
 
+      def exit_with_pid(pid)
+        $stderr.puts "A server is already running (pid: #{pid}, file: #{options[:pid]})."
+        exit(1)
+      end
   end
 
 end

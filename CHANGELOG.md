@@ -2,13 +2,68 @@
 
 All notable changes to this project will be documented in this file. For info on how to format all future additions to this file please reference [Keep A Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
+## [3.0.0] - Unreleased
+
+### Security
+
+- Do not use semicolon as GET parameter separator. ([#1733](https://github.com/rack/rack/pull/1733), [@jeremyevans](https://github.com/jeremyevans))
+
+### Added
+
+- `Rack::RewindableInput` supports size. ([@ahorek](https://github.com/ahorek))
+
+### Changed
+
+- BREAKING CHANGE: Require `status` to be an Integer. ([#1662](https://github.com/rack/rack/pull/1662), [@olleolleolle](https://github.com/olleolleolle))
+- Relax validations around `Rack::Request#host` and `Rack::Request#hostname`. ([#1606](https://github.com/rack/rack/issues/1606), [@pvande](https://github.com/pvande))
+- Removed antiquated handlers: FCGI, LSWS, SCGI, Thin. ([#1658](https://github.com/rack/rack/pull/1658), [@ioquatix](https://github.com/ioquatix))
+- Removed options from `Rack::Builder.parse_file` and `Rack::Builder.load_file`. ([#1663](https://github.com/rack/rack/pull/1663), [@ioquatix](https://github.com/ioquatix))
+- HMAC argument for `Rack::Session::Cookie` doesn't accept a class constant anymore, but only a string recognized by OpenSSL (e.g. `"SHA256"`) or compatible instance (e.g. `OpenSSL::Digest.new("SHA256")`) ([#1676](https://github.com/rack/rack/pull/1676), [@bdewater](https://github.com/bdewater))
+- `Rack::HTTP_VERSION` has been removed and the `HTTP_VERSION` env setting is no longer set in the CGI and Webrick handlers . ([#970](https://github.com/rack/rack/issues/970), [@jeremyevans](https://github.com/jeremyevans))
+- `Rack::Request#[]` and `#[]=` now warn even in non-verbose mode. ([#1277](https://github.com/rack/rack/issues/1277), [@jeremyevans](https://github.com/jeremyevans))
+- Decrease default allowed parameter recursion level from 100 to 32. ([#1640](https://github.com/rack/rack/issues/1640), [@jeremyevans](https://github.com/jeremyevans))
+- Attempting to parse a multipart response with an empty body now raises Rack::Multipart::EmptyContentError. ([#1603](https://github.com/rack/rack/issues/1603), [@jeremyevans](https://github.com/jeremyevans))
+- `Rack::Utils.secure_compare` uses OpenSSL's faster implementation if available. ([#1711](https://github.com/rack/rack/pull/1711), [@bdewater](https://github.com/bdewater))
+
+### Fixed
+
+- Make Rack::MockResponse handle non-hash headers. ([#1629](https://github.com/rack/rack/issues/1629), [@jeremyevans](https://github.com/jeremyevans))
+- TempfileReaper now deletes temp files if application raises an exception. ([#1679](https://github.com/rack/rack/issues/1679), [@jeremyevans](https://github.com/jeremyevans))
+- Fix using Rack::Session::Cookie with coder: Rack::Session::Cookie::Base64::{JSON,Zip}. ([#1666](https://github.com/rack/rack/issues/1666), [@jeremyevans](https://github.com/jeremyevans))
+- Avoid NoMethodError when accessing Rack::Session::Cookie without requiring delegate first. ([#1610](https://github.com/rack/rack/issues/1610), [@onigra](https://github.com/onigra))
+- Handle cookies with values that end in '=' ([#1645](https://github.com/rack/rack/pull/1645), [@lukaso](https://github.com/lukaso))
+- Fix multipart filename generation for filenames that contain spaces. Encode spaces as "%20" instead of "+" which will be decoded properly by the mulitpart parser. ([#1736](https://github.com/rack/rack/pull/1645), [@muirdm](https://github.com/muirdm))
+- `Rack::Request#scheme` returns `ws` or `wss` when one of the `X-Forwarded-Scheme` / `X-Forwarded-Proto` headers is set to `ws` or `wss`, respectively. ([#1730](https://github.com/rack/rack/issues/1730), [@erwanst](https://github.com/erwanst))
+
+## [2.2.3] - 2020-06-15
+
+### Security
+
+- [[CVE-2020-8184](https://nvd.nist.gov/vuln/detail/CVE-2020-8184)] Do not allow percent-encoded cookie name to override existing cookie names. BREAKING CHANGE: Accessing cookie names that require URL encoding with decoded name no longer works. ([@fletchto99](https://github.com/fletchto99))
+
+## [2.2.2] - 2020-02-11
+
+### Fixed
+
+- Fix incorrect `Rack::Request#host` value. ([#1591](https://github.com/rack/rack/pull/1591), [@ioquatix](https://github.com/ioquatix))
+- Revert `Rack::Handler::Thin` implementation. ([#1583](https://github.com/rack/rack/pull/1583), [@jeremyevans](https://github.com/jeremyevans))
+- Double assignment is still needed to prevent an "unused variable" warning. ([#1589](https://github.com/rack/rack/pull/1589), [@kamipo](https://github.com/kamipo))
+- Fix to handle same_site option for session pool. ([#1587](https://github.com/rack/rack/pull/1587), [@kamipo](https://github.com/kamipo))
+
+## [2.2.1] - 2020-02-09
+
+### Fixed
+
+- Rework `Rack::Request#ip` to handle empty `forwarded_for`. ([#1577](https://github.com/rack/rack/pull/1577), [@ioquatix](https://github.com/ioquatix))
+
+## [2.2.0] - 2020-02-08
 
 ### SPEC Changes
 
 - `rack.session` request environment entry must respond to `to_hash` and return unfrozen Hash. ([@jeremyevans](https://github.com/jeremyevans))
 - Request environment cannot be frozen. ([@jeremyevans](https://github.com/jeremyevans))
 - CGI values in the request environment with non-ASCII characters must use ASCII-8BIT encoding. ([@jeremyevans](https://github.com/jeremyevans))
+- Improve SPEC/lint relating to SERVER_NAME, SERVER_PORT and HTTP_HOST. ([#1561](https://github.com/rack/rack/pull/1561), [@ioquatix](https://github.com/ioquatix))
 
 ### Added
 
@@ -20,9 +75,16 @@ All notable changes to this project will be documented in this file. For info on
 - `Static` supports a `:cascade` option for calling the app if there is no matching file. ([@jeremyevans](https://github.com/jeremyevans))
 - `Session::Abstract::SessionHash#dig`. ([@jeremyevans](https://github.com/jeremyevans))
 - `Response.[]` and `MockResponse.[]` for creating instances using status, headers, and body. ([@ioquatix](https://github.com/ioquatix))
+- Convenient cache and content type methods for `Rack::Response`. ([#1555](https://github.com/rack/rack/pull/1555), [@ioquatix](https://github.com/ioquatix))
 
 ### Changed
 
+- `Request#params` no longer rescues EOFError. ([@jeremyevans](https://github.com/jeremyevans))
+- `Directory` uses a streaming approach, significantly improving time to first byte for large directories. ([@jeremyevans](https://github.com/jeremyevans))
+- `Directory` no longer includes a Parent directory link in the root directory index. ([@jeremyevans](https://github.com/jeremyevans))
+- `QueryParser#parse_nested_query` uses original backtrace when reraising exception with new class. ([@jeremyevans](https://github.com/jeremyevans))
+- `ConditionalGet` follows RFC 7232 precedence if both If-None-Match and If-Modified-Since headers are provided. ([@jeremyevans](https://github.com/jeremyevans))
+- `.ru` files supports the `frozen-string-literal` magic comment. ([@eregon](https://github.com/eregon))
 - Rely on autoload to load constants instead of requiring internal files, make sure to require 'rack' and not just 'rack/...'. ([@jeremyevans](https://github.com/jeremyevans))
 - `Etag` will continue sending ETag even if the response should not be cached. ([@henm](https://github.com/henm))
 - `Request#host_with_port` no longer includes a colon for a missing or empty port. ([@AlexWayfer](https://github.com/AlexWayfer))
@@ -30,17 +92,25 @@ All notable changes to this project will be documented in this file. For info on
 - `Files` handling of range requests no longer return a body that supports `to_path`, to ensure range requests are handled correctly. ([@jeremyevans](https://github.com/jeremyevans))
 - `Multipart::Generator` only includes `Content-Length` for files with paths, and `Content-Disposition` `filename` if the `UploadedFile` instance has one. ([@jeremyevans](https://github.com/jeremyevans))
 - `Request#ssl?` is true for the `wss` scheme (secure websockets). ([@jeremyevans](https://github.com/jeremyevans))
+- `Rack::HeaderHash` is memoized by default. ([#1549](https://github.com/rack/rack/pull/1549), [@ioquatix](https://github.com/ioquatix))
+- `Rack::Directory` allow directory traversal inside root directory. ([#1417](https://github.com/rack/rack/pull/1417), [@ThomasSevestre](https://github.com/ThomasSevestre))
+- Sort encodings by server preference. ([#1184](https://github.com/rack/rack/pull/1184), [@ioquatix](https://github.com/ioquatix), [@wjordan](https://github.com/wjordan))
+- Rework host/hostname/authority implementation in `Rack::Request`. `#host` and `#host_with_port` have been changed to correctly return IPv6 addresses formatted with square brackets, as defined by [RFC3986](https://tools.ietf.org/html/rfc3986#section-3.2.2). ([#1561](https://github.com/rack/rack/pull/1561), [@ioquatix](https://github.com/ioquatix))
+- `Rack::Builder` parsing options on first `#\` line is deprecated. ([#1574](https://github.com/rack/rack/pull/1574), [@ioquatix](https://github.com/ioquatix))
 
 ### Removed
 
+- `Directory#path` as it was not used and always returned nil. ([@jeremyevans](https://github.com/jeremyevans))
 - `BodyProxy#each` as it was only needed to work around a bug in Ruby <1.9.3. ([@jeremyevans](https://github.com/jeremyevans))
-- `Session::Abstract::SessionHash#transform_keys`, no longer needed. (pavel)
 - `URLMap::INFINITY` and `URLMap::NEGATIVE_INFINITY`, in favor of `Float::INFINITY`. ([@ch1c0t](https://github.com/ch1c0t))
 - Deprecation of `Rack::File`. It will be deprecated again in rack 2.2 or 3.0. ([@rafaelfranca](https://github.com/rafaelfranca))
 - Support for Ruby 2.2 as it is well past EOL. ([@ioquatix](https://github.com/ioquatix))
+- Remove `Rack::Files#response_body` as the implementation was broken. ([#1153](https://github.com/rack/rack/pull/1153), [@ioquatix](https://github.com/ioquatix))
+- Remove `SERVER_ADDR` which was never part of the original SPEC. ([#1573](https://github.com/rack/rack/pull/1573), [@ioquatix](https://github.com/ioquatix))
 
 ### Fixed
 
+- `Directory` correctly handles root paths containing glob metacharacters. ([@jeremyevans](https://github.com/jeremyevans))
 - `Cascade` uses a new response object for each call if initialized with no apps. ([@jeremyevans](https://github.com/jeremyevans))
 - `BodyProxy` correctly delegates keyword arguments to the body object on Ruby 2.7+. ([@jeremyevans](https://github.com/jeremyevans))
 - `BodyProxy#method` correctly handles methods delegated to the body object. ([@jeremyevans](https://github.com/jeremyevans))
@@ -54,25 +124,30 @@ All notable changes to this project will be documented in this file. For info on
 - `Request#delete_cookie` and related `Utils` methods do an exact match on `:domain` and `:path` options. ([@jeremyevans](https://github.com/jeremyevans))
 - `Static` no longer adds headers when a gzipped file request has a 304 response. ([@chooh](https://github.com/chooh))
 - `ContentLength` sets `Content-Length` response header even for bodies not responding to `to_ary`. ([@jeremyevans](https://github.com/jeremyevans))
-- `Multipart::Parser` uses a slightly modified parser to avoid denial of service when parsing MIME boundaries. ([@aiomaster](https://github.com/aiomaster))
 - Thin handler supports options passed directly to `Thin::Controllers::Controller`. ([@jeremyevans](https://github.com/jeremyevans))
 - WEBrick handler no longer ignores `:BindAddress` option. ([@jeremyevans](https://github.com/jeremyevans))
 - `ShowExceptions` handles invalid POST data. ([@jeremyevans](https://github.com/jeremyevans))
 - Basic authentication requires a password, even if the password is empty. ([@jeremyevans](https://github.com/jeremyevans))
-- `Deflater` no longer deflates if `Content-Length` is 0, fixing usage with `Sendfile`. ([@jeremyevans](https://github.com/jeremyevans))
 - `Lint` checks response is array with 3 elements, per SPEC. ([@jeremyevans](https://github.com/jeremyevans))
-- Handle session stores that are not hashes by calling `to_hash`. ([@oleh-demyanyuk](https://github.com/oleh-demyanyuk))
-- `Session::Abstract::PersistedSecure::SecureSessionHash#[]` handles session id key when it is missing. ([@jeremyevans](https://github.com/jeremyevans))
 - Support for using `:SSLEnable` option when using WEBrick handler. (Gregor Melhorn)
 - Close response body after buffering it when buffering. ([@ioquatix](https://github.com/ioquatix))
 - Only accept `;` as delimiter when parsing cookies. ([@mrageh](https://github.com/mrageh))
-- `Utils::HeaderHash#clear` clears the name mapping as well. ([@raxoft](https://github.com/raxoft)) 
+- `Utils::HeaderHash#clear` clears the name mapping as well. ([@raxoft](https://github.com/raxoft))
 - Support for passing `nil` `Rack::Files.new`, which notably fixes Rails' current `ActiveStorage::FileServer` implementation. ([@ioquatix](https://github.com/ioquatix))
 
 ### Documentation
 
 - CHANGELOG updates. ([@aupajo](https://github.com/aupajo))
 - Added [CONTRIBUTING](CONTRIBUTING.md). ([@dblock](https://github.com/dblock))
+
+## [2.1.2] - 2020-01-27
+
+- Fix multipart parser for some files to prevent denial of service ([@aiomaster](https://github.com/aiomaster))
+- Fix `Rack::Builder#use` with keyword arguments ([@kamipo](https://github.com/kamipo))
+- Skip deflating in Rack::Deflater if Content-Length is 0 ([@jeremyevans](https://github.com/jeremyevans))
+- Remove `SessionHash#transform_keys`, no longer needed ([@pavel](https://github.com/pavel))
+- Add to_hash to wrap Hash and Session classes ([@oleh-demyanyuk](https://github.com/oleh-demyanyuk))
+- Handle case where session id key is requested but missing ([@jeremyevans](https://github.com/jeremyevans))
 
 ## [2.1.1] - 2020-01-12
 
@@ -121,7 +196,7 @@ All notable changes to this project will be documented in this file. For info on
 
 ### Removed
 
-- Remove `to_ary` from Response ([@tenderlove](https://github.com/tenderlove))
+- BREAKING CHANGE: Remove `to_ary` from Response ([@tenderlove](https://github.com/tenderlove))
 - Deprecate `Rack::Session::Memcache` in favor of `Rack::Session::Dalli` from dalli gem ([@fatkodima](https://github.com/fatkodima))
 
 ### Fixed

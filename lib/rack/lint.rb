@@ -17,12 +17,13 @@ module Rack
     class LintError < RuntimeError; end
     module Assertion
       def assert(message)
+        warn("Rack::Lint::Assertion#assert is deprecated as it is inherently inefficient. " \
+          "Use `raise Rack::Lint::LintError, 'msg' unless condition` instead", uplevel: 1)
         unless yield
           raise LintError, message
         end
       end
     end
-    include Assertion
 
     ## This specification aims to formalize the Rack protocol.  You
     ## can (and should) use Rack::Lint to enforce it.
@@ -40,7 +41,7 @@ module Rack
 
     def _call(env)
       ## It takes exactly one argument, the *environment*
-      assert("No env given") { env }
+      raise LintError, "No env given" unless env
       check_env env
 
       env[RACK_INPUT] = InputWrapper.new(env[RACK_INPUT])
@@ -48,12 +49,8 @@ module Rack
 
       ## and returns an Array of exactly three values:
       ary = @app.call(env)
-      assert("response #{ary.inspect} is not an Array , but #{ary.class}") {
-        ary.kind_of? Array
-      }
-      assert("response array #{ary.inspect} has #{ary.size} elements instead of 3") {
-        ary.size == 3
-      }
+      raise LintError, "response is not an Array, but #{ary.class}" unless ary.kind_of? Array
+      raise LintError, "response array has #{ary.size} elements instead of 3" unless ary.size == 3
 
       status, headers, @body = ary
       ## The *status*,
@@ -78,12 +75,8 @@ module Rack
       ## The environment must be an unfrozen instance of Hash that includes
       ## CGI-like headers.  The application is free to modify the
       ## environment.
-      assert("env #{env.inspect} is not a Hash, but #{env.class}") {
-        env.kind_of? Hash
-      }
-      assert("env should not be frozen, but is") {
-        !env.frozen?
-      }
+      raise LintError, "env #{env.inspect} is not a Hash, but #{env.class}" unless env.kind_of? Hash
+      raise LintError, "env should not be frozen, but is" if env.frozen?
 
       ##
       ## The environment is required to include these variables
@@ -117,17 +110,19 @@ module Rack
       ##                         follows the <tt>?</tt>, if any. May be
       ##                         empty, but is always required!
 
-      ## <tt>SERVER_NAME</tt>, <tt>SERVER_PORT</tt>::
-      ##                        When combined with <tt>SCRIPT_NAME</tt> and
+      ## <tt>SERVER_NAME</tt>:: When combined with <tt>SCRIPT_NAME</tt> and
       ##                        <tt>PATH_INFO</tt>, these variables can be
       ##                        used to complete the URL. Note, however,
       ##                        that <tt>HTTP_HOST</tt>, if present,
       ##                        should be used in preference to
       ##                        <tt>SERVER_NAME</tt> for reconstructing
       ##                        the request URL.
-      ##                        <tt>SERVER_NAME</tt> and <tt>SERVER_PORT</tt>
-      ##                        can never be empty strings, and so
-      ##                        are always required.
+      ##                        <tt>SERVER_NAME</tt> can never be an empty
+      ##                        string, and so is always required.
+
+      ## <tt>SERVER_PORT</tt>:: An optional +Integer+ which is the port the
+      ##                        server is running on. Should be specified if
+      ##                        the server is running on a non-standard port.
 
       ## <tt>HTTP_</tt> Variables:: Variables corresponding to the
       ##                            client-supplied HTTP request
@@ -193,73 +188,73 @@ module Rack
       ##                         The store must implement:
       if session = env[RACK_SESSION]
         ##                         store(key, value)         (aliased as []=);
-        assert("session #{session.inspect} must respond to store and []=") {
-          session.respond_to?(:store) && session.respond_to?(:[]=)
-        }
+        unless session.respond_to?(:store) && session.respond_to?(:[]=)
+          raise LintError, "session #{session.inspect} must respond to store and []="
+        end
 
         ##                         fetch(key, default = nil) (aliased as []);
-        assert("session #{session.inspect} must respond to fetch and []") {
-          session.respond_to?(:fetch) && session.respond_to?(:[])
-        }
+        unless session.respond_to?(:fetch) && session.respond_to?(:[])
+          raise LintError, "session #{session.inspect} must respond to fetch and []"
+        end
 
         ##                         delete(key);
-        assert("session #{session.inspect} must respond to delete") {
-          session.respond_to?(:delete)
-        }
+        unless session.respond_to?(:delete)
+          raise LintError, "session #{session.inspect} must respond to delete"
+        end
 
         ##                         clear;
-        assert("session #{session.inspect} must respond to clear") {
-          session.respond_to?(:clear)
-        }
+        unless session.respond_to?(:clear)
+          raise LintError, "session #{session.inspect} must respond to clear"
+        end
 
         ##                         to_hash (returning unfrozen Hash instance);
-        assert("session #{session.inspect} must respond to to_hash and return unfrozen Hash instance") {
-          session.respond_to?(:to_hash) && session.to_hash.kind_of?(Hash) && !session.to_hash.frozen?
-        }
+        unless session.respond_to?(:to_hash) && session.to_hash.kind_of?(Hash) && !session.to_hash.frozen?
+          raise LintError, "session #{session.inspect} must respond to to_hash and return unfrozen Hash instance"
+        end
       end
 
       ## <tt>rack.logger</tt>:: A common object interface for logging messages.
       ##                        The object must implement:
       if logger = env[RACK_LOGGER]
         ##                         info(message, &block)
-        assert("logger #{logger.inspect} must respond to info") {
-          logger.respond_to?(:info)
-        }
+        unless logger.respond_to?(:info)
+          raise LintError, "logger #{logger.inspect} must respond to info"
+        end
 
         ##                         debug(message, &block)
-        assert("logger #{logger.inspect} must respond to debug") {
-          logger.respond_to?(:debug)
-        }
+        unless logger.respond_to?(:debug)
+          raise LintError, "logger #{logger.inspect} must respond to debug"
+        end
 
         ##                         warn(message, &block)
-        assert("logger #{logger.inspect} must respond to warn") {
-          logger.respond_to?(:warn)
-        }
+        unless logger.respond_to?(:warn)
+          raise LintError, "logger #{logger.inspect} must respond to warn"
+        end
 
         ##                         error(message, &block)
-        assert("logger #{logger.inspect} must respond to error") {
-          logger.respond_to?(:error)
-        }
+        unless logger.respond_to?(:error)
+          raise LintError, "logger #{logger.inspect} must respond to error"
+        end
 
         ##                         fatal(message, &block)
-        assert("logger #{logger.inspect} must respond to fatal") {
-          logger.respond_to?(:fatal)
-        }
+        unless logger.respond_to?(:fatal)
+          raise LintError, "logger #{logger.inspect} must respond to fatal"
+        end
       end
 
       ## <tt>rack.multipart.buffer_size</tt>:: An Integer hint to the multipart parser as to what chunk size to use for reads and writes.
       if bufsize = env[RACK_MULTIPART_BUFFER_SIZE]
-        assert("rack.multipart.buffer_size must be an Integer > 0 if specified") {
-          bufsize.is_a?(Integer) && bufsize > 0
-        }
+        unless bufsize.is_a?(Integer) && bufsize > 0
+          raise LintError, "rack.multipart.buffer_size must be an Integer > 0 if specified"
+        end
       end
 
       ## <tt>rack.multipart.tempfile_factory</tt>:: An object responding to #call with two arguments, the filename and content_type given for the multipart form field, and returning an IO-like object that responds to #<< and optionally #rewind. This factory will be used to instantiate the tempfile for each multipart form file upload field, rather than the default class of Tempfile.
       if tempfile_factory = env[RACK_MULTIPART_TEMPFILE_FACTORY]
-        assert("rack.multipart.tempfile_factory must respond to #call") { tempfile_factory.respond_to?(:call) }
+        raise LintError, "rack.multipart.tempfile_factory must respond to #call" unless tempfile_factory.respond_to?(:call)
         env[RACK_MULTIPART_TEMPFILE_FACTORY] = lambda do |filename, content_type|
           io = tempfile_factory.call(filename, content_type)
-          assert("rack.multipart.tempfile_factory return value must respond to #<<") { io.respond_to?(:<<) }
+          raise LintError, "rack.multipart.tempfile_factory return value must respond to #<<" unless io.respond_to?(:<<)
           io
         end
       end
@@ -271,20 +266,35 @@ module Rack
       ## accepted specifications and must not be used otherwise.
       ##
 
-      %w[REQUEST_METHOD SERVER_NAME SERVER_PORT
-         QUERY_STRING
+      %w[REQUEST_METHOD SERVER_NAME QUERY_STRING
          rack.version rack.input rack.errors
          rack.multithread rack.multiprocess rack.run_once].each { |header|
-        assert("env missing required key #{header}") { env.include? header }
+        raise LintError, "env missing required key #{header}" unless env.include? header
       }
+
+      ## The <tt>SERVER_PORT</tt> must be an Integer if set.
+      server_port = env["SERVER_PORT"]
+      unless server_port.nil? || (Integer(server_port) rescue false)
+        raise LintError, "env[SERVER_PORT] is not an Integer"
+      end
+
+      ## The <tt>SERVER_NAME</tt> must be a valid authority as defined by RFC7540.
+      unless (URI.parse("http://#{env[SERVER_NAME]}/") rescue false)
+        raise LintError, "#{env[SERVER_NAME]} must be a valid authority"
+      end
+
+      ## The <tt>HTTP_HOST</tt> must be a valid authority as defined by RFC7540.
+      unless (URI.parse("http://#{env[HTTP_HOST]}/") rescue false)
+        raise LintError, "#{env[HTTP_HOST]} must be a valid authority"
+      end
 
       ## The environment must not contain the keys
       ## <tt>HTTP_CONTENT_TYPE</tt> or <tt>HTTP_CONTENT_LENGTH</tt>
       ## (use the versions without <tt>HTTP_</tt>).
       %w[HTTP_CONTENT_TYPE HTTP_CONTENT_LENGTH].each { |header|
-        assert("env contains #{header}, must use #{header[5, -1]}") {
-          not env.include? header
-        }
+        if env.include? header
+          raise LintError, "env contains #{header}, must use #{header[5, -1]}"
+        end
       }
 
       ## The CGI keys (named without a period) must have String values.
@@ -292,25 +302,25 @@ module Rack
       ## they should use ASCII-8BIT encoding.
       env.each { |key, value|
         next  if key.include? "."   # Skip extensions
-        assert("env variable #{key} has non-string value #{value.inspect}") {
-          value.kind_of? String
-        }
+        unless value.kind_of? String
+          raise LintError, "env variable #{key} has non-string value #{value.inspect}"
+        end
         next if value.encoding == Encoding::ASCII_8BIT
-        assert("env variable #{key} has value containing non-ASCII characters and has non-ASCII-8BIT encoding #{value.inspect} encoding: #{value.encoding}") {
-          value.b !~ /[\x80-\xff]/n
-        }
+        unless value.b !~ /[\x80-\xff]/n
+          raise LintError, "env variable #{key} has value containing non-ASCII characters and has non-ASCII-8BIT encoding #{value.inspect} encoding: #{value.encoding}"
+        end
       }
 
       ## There are the following restrictions:
 
       ## * <tt>rack.version</tt> must be an array of Integers.
-      assert("rack.version must be an Array, was #{env[RACK_VERSION].class}") {
-        env[RACK_VERSION].kind_of? Array
-      }
+      unless env[RACK_VERSION].kind_of? Array
+        raise LintError, "rack.version must be an Array, was #{env[RACK_VERSION].class}"
+      end
       ## * <tt>rack.url_scheme</tt> must either be +http+ or +https+.
-      assert("rack.url_scheme unknown: #{env[RACK_URL_SCHEME].inspect}") {
-        %w[http https].include?(env[RACK_URL_SCHEME])
-      }
+      unless %w[http https].include?(env[RACK_URL_SCHEME])
+        raise LintError, "rack.url_scheme unknown: #{env[RACK_URL_SCHEME].inspect}"
+      end
 
       ## * There must be a valid input stream in <tt>rack.input</tt>.
       check_input env[RACK_INPUT]
@@ -320,37 +330,33 @@ module Rack
       check_hijack env
 
       ## * The <tt>REQUEST_METHOD</tt> must be a valid token.
-      assert("REQUEST_METHOD unknown: #{env[REQUEST_METHOD]}") {
-        env[REQUEST_METHOD] =~ /\A[0-9A-Za-z!\#$%&'*+.^_`|~-]+\z/
-      }
+      unless env[REQUEST_METHOD] =~ /\A[0-9A-Za-z!\#$%&'*+.^_`|~-]+\z/
+        raise LintError, "REQUEST_METHOD unknown: #{env[REQUEST_METHOD]}"
+      end
 
       ## * The <tt>SCRIPT_NAME</tt>, if non-empty, must start with <tt>/</tt>
-      assert("SCRIPT_NAME must start with /") {
-        !env.include?(SCRIPT_NAME) ||
-        env[SCRIPT_NAME] == "" ||
-        env[SCRIPT_NAME] =~ /\A\//
-      }
+      if env.include?(SCRIPT_NAME) && env[SCRIPT_NAME] != "" && env[SCRIPT_NAME] !~ /\A\//
+        raise LintError, "SCRIPT_NAME must start with /"
+      end
       ## * The <tt>PATH_INFO</tt>, if non-empty, must start with <tt>/</tt>
-      assert("PATH_INFO must start with /") {
-        !env.include?(PATH_INFO) ||
-        env[PATH_INFO] == "" ||
-        env[PATH_INFO] =~ /\A\//
-      }
+      if env.include?(PATH_INFO) && env[PATH_INFO] != "" && env[PATH_INFO] !~ /\A\//
+        raise LintError, "PATH_INFO must start with /"
+      end
       ## * The <tt>CONTENT_LENGTH</tt>, if given, must consist of digits only.
-      assert("Invalid CONTENT_LENGTH: #{env["CONTENT_LENGTH"]}") {
-        !env.include?("CONTENT_LENGTH") || env["CONTENT_LENGTH"] =~ /\A\d+\z/
-      }
+      if env.include?("CONTENT_LENGTH") && env["CONTENT_LENGTH"] !~ /\A\d+\z/
+        raise LintError, "Invalid CONTENT_LENGTH: #{env["CONTENT_LENGTH"]}"
+      end
 
       ## * One of <tt>SCRIPT_NAME</tt> or <tt>PATH_INFO</tt> must be
       ##   set.  <tt>PATH_INFO</tt> should be <tt>/</tt> if
       ##   <tt>SCRIPT_NAME</tt> is empty.
-      assert("One of SCRIPT_NAME or PATH_INFO must be set (make PATH_INFO '/' if SCRIPT_NAME is empty)") {
-        env[SCRIPT_NAME] || env[PATH_INFO]
-      }
+      unless env[SCRIPT_NAME] || env[PATH_INFO]
+        raise LintError, "One of SCRIPT_NAME or PATH_INFO must be set (make PATH_INFO '/' if SCRIPT_NAME is empty)"
+      end
       ##   <tt>SCRIPT_NAME</tt> never should be <tt>/</tt>, but instead be empty.
-      assert("SCRIPT_NAME cannot be '/', make it '' and PATH_INFO '/'") {
-        env[SCRIPT_NAME] != "/"
-      }
+      unless env[SCRIPT_NAME] != "/"
+        raise LintError, "SCRIPT_NAME cannot be '/', make it '' and PATH_INFO '/'"
+      end
     end
 
     ## === The Input Stream
@@ -360,24 +366,22 @@ module Rack
     def check_input(input)
       ## When applicable, its external encoding must be "ASCII-8BIT" and it
       ## must be opened in binary mode, for Ruby 1.9 compatibility.
-      assert("rack.input #{input} does not have ASCII-8BIT as its external encoding") {
-        input.external_encoding == Encoding::ASCII_8BIT
-      } if input.respond_to?(:external_encoding)
-      assert("rack.input #{input} is not opened in binary mode") {
-        input.binmode?
-      } if input.respond_to?(:binmode?)
+      if input.respond_to?(:external_encoding) && input.external_encoding != Encoding::ASCII_8BIT
+        raise LintError, "rack.input #{input} does not have ASCII-8BIT as its external encoding"
+      end
+      if input.respond_to?(:binmode?) && !input.binmode?
+        raise LintError, "rack.input #{input} is not opened in binary mode"
+      end
 
       ## The input stream must respond to +gets+, +each+, +read+ and +rewind+.
       [:gets, :each, :read, :rewind].each { |method|
-        assert("rack.input #{input} does not respond to ##{method}") {
-          input.respond_to? method
-        }
+        unless input.respond_to? method
+          raise LintError, "rack.input #{input} does not respond to ##{method}"
+        end
       }
     end
 
     class InputWrapper
-      include Assertion
-
       def initialize(input)
         @input = input
       end
@@ -385,11 +389,11 @@ module Rack
       ## * +gets+ must be called without arguments and return a string,
       ##   or +nil+ on EOF.
       def gets(*args)
-        assert("rack.input#gets called with arguments") { args.size == 0 }
+        raise LintError, "rack.input#gets called with arguments" unless args.size == 0
         v = @input.gets
-        assert("rack.input#gets didn't return a String") {
-          v.nil? or v.kind_of? String
-        }
+        unless v.nil? or v.kind_of? String
+          raise LintError, "rack.input#gets didn't return a String"
+        end
         v
       end
 
@@ -411,32 +415,32 @@ module Rack
       ##   If +buffer+ is given, then the read data will be placed
       ##   into +buffer+ instead of a newly created String object.
       def read(*args)
-        assert("rack.input#read called with too many arguments") {
-          args.size <= 2
-        }
+        unless args.size <= 2
+          raise LintError, "rack.input#read called with too many arguments"
+        end
         if args.size >= 1
-          assert("rack.input#read called with non-integer and non-nil length") {
-            args.first.kind_of?(Integer) || args.first.nil?
-          }
-          assert("rack.input#read called with a negative length") {
-            args.first.nil? || args.first >= 0
-          }
+          unless args.first.kind_of?(Integer) || args.first.nil?
+            raise LintError, "rack.input#read called with non-integer and non-nil length"
+          end
+          unless args.first.nil? || args.first >= 0
+            raise LintError, "rack.input#read called with a negative length"
+          end
         end
         if args.size >= 2
-          assert("rack.input#read called with non-String buffer") {
-            args[1].kind_of?(String)
-          }
+          unless args[1].kind_of?(String)
+            raise LintError, "rack.input#read called with non-String buffer"
+          end
         end
 
         v = @input.read(*args)
 
-        assert("rack.input#read didn't return nil or a String") {
-          v.nil? or v.kind_of? String
-        }
+        unless v.nil? or v.kind_of? String
+          raise LintError, "rack.input#read didn't return nil or a String"
+        end
         if args[0].nil?
-          assert("rack.input#read(nil) returned nil on EOF") {
-            !v.nil?
-          }
+          unless !v.nil?
+            raise LintError, "rack.input#read(nil) returned nil on EOF"
+          end
         end
 
         v
@@ -444,11 +448,11 @@ module Rack
 
       ## * +each+ must be called without arguments and only yield Strings.
       def each(*args)
-        assert("rack.input#each called with arguments") { args.size == 0 }
+        raise LintError, "rack.input#each called with arguments" unless args.size == 0
         @input.each { |line|
-          assert("rack.input#each didn't yield a String") {
-            line.kind_of? String
-          }
+          unless line.kind_of? String
+            raise LintError, "rack.input#each didn't yield a String"
+          end
           yield line
         }
       end
@@ -459,20 +463,18 @@ module Rack
       ##   developers must buffer the input data into some rewindable object
       ##   if the underlying input stream is not rewindable.
       def rewind(*args)
-        assert("rack.input#rewind called with arguments") { args.size == 0 }
-        assert("rack.input#rewind raised Errno::ESPIPE") {
-          begin
-            @input.rewind
-            true
-          rescue Errno::ESPIPE
-            false
-          end
-        }
+        raise LintError, "rack.input#rewind called with arguments" unless args.size == 0
+        begin
+          @input.rewind
+          true
+        rescue Errno::ESPIPE
+          raise LintError, "rack.input#rewind raised Errno::ESPIPE"
+        end
       end
 
       ## * +close+ must never be called on the input stream.
       def close(*args)
-        assert("rack.input#close must not be called") { false }
+        raise LintError, "rack.input#close must not be called"
       end
     end
 
@@ -480,15 +482,13 @@ module Rack
     def check_error(error)
       ## The error stream must respond to +puts+, +write+ and +flush+.
       [:puts, :write, :flush].each { |method|
-        assert("rack.error #{error} does not respond to ##{method}") {
-          error.respond_to? method
-        }
+        unless error.respond_to? method
+          raise LintError, "rack.error #{error} does not respond to ##{method}"
+        end
       }
     end
 
     class ErrorWrapper
-      include Assertion
-
       def initialize(error)
         @error = error
       end
@@ -500,7 +500,7 @@ module Rack
 
       ## * +write+ must be called with a single argument that is a String.
       def write(str)
-        assert("rack.errors#write not called with a String") { str.kind_of? String }
+        raise LintError, "rack.errors#write not called with a String" unless str.kind_of? String
         @error.write str
       end
 
@@ -512,12 +512,11 @@ module Rack
 
       ## * +close+ must never be called on the error stream.
       def close(*args)
-        assert("rack.errors#close must not be called") { false }
+        raise LintError, "rack.errors#close must not be called"
       end
     end
 
     class HijackWrapper
-      include Assertion
       extend Forwardable
 
       REQUIRED_METHODS = [
@@ -530,7 +529,7 @@ module Rack
       def initialize(io)
         @io = io
         REQUIRED_METHODS.each do |meth|
-          assert("rack.hijack_io must respond to #{meth}") { io.respond_to? meth }
+          raise LintError, "rack.hijack_io must respond to #{meth}" unless io.respond_to? meth
         end
       end
     end
@@ -546,7 +545,7 @@ module Rack
       if env[RACK_IS_HIJACK]
         ## If rack.hijack? is true then rack.hijack must respond to #call.
         original_hijack = env[RACK_HIJACK]
-        assert("rack.hijack must respond to call") { original_hijack.respond_to?(:call) }
+        raise LintError, "rack.hijack must respond to call" unless original_hijack.respond_to?(:call)
         env[RACK_HIJACK] = proc do
           ## rack.hijack must return the io that will also be assigned (or is
           ## already present, in rack.hijack_io.
@@ -579,10 +578,10 @@ module Rack
       else
         ##
         ## If rack.hijack? is false, then rack.hijack should not be set.
-        assert("rack.hijack? is false, but rack.hijack is present") { env[RACK_HIJACK].nil? }
+        raise LintError, "rack.hijack? is false, but rack.hijack is present" unless env[RACK_HIJACK].nil?
         ##
         ## If rack.hijack? is false, then rack.hijack_io should not be set.
-        assert("rack.hijack? is false, but rack.hijack_io is present") { env[RACK_HIJACK_IO].nil? }
+        raise LintError, "rack.hijack? is false, but rack.hijack_io is present" unless env[RACK_HIJACK_IO].nil?
       end
     end
 
@@ -593,7 +592,7 @@ module Rack
 
       # this check uses headers like a hash, but the spec only requires
       # headers respond to #each
-      headers = Rack::Utils::HeaderHash.new(headers)
+      headers = Rack::Utils::HeaderHash[headers]
 
       ## In order to do this, an application may set the special header
       ## <tt>rack.hijack</tt> to an object that responds to <tt>call</tt>
@@ -613,9 +612,9 @@ module Rack
       ## the <tt>rack.hijack</tt> response API is in use.
 
       if env[RACK_IS_HIJACK] && headers[RACK_HIJACK]
-        assert('rack.hijack header must respond to #call') {
-          headers[RACK_HIJACK].respond_to? :call
-        }
+        unless headers[RACK_HIJACK].respond_to? :call
+          raise LintError, 'rack.hijack header must respond to #call'
+        end
         original_hijack = headers[RACK_HIJACK]
         proc do |io|
           original_hijack.call HijackWrapper.new(io)
@@ -624,9 +623,9 @@ module Rack
         ##
         ## The special response header <tt>rack.hijack</tt> must only be set
         ## if the request env has <tt>rack.hijack?</tt> <tt>true</tt>.
-        assert('rack.hijack header must not be present if server does not support hijacking') {
-          headers[RACK_HIJACK].nil?
-        }
+        unless headers[RACK_HIJACK].nil?
+          raise LintError, 'rack.hijack header must not be present if server does not support hijacking'
+        end
 
         nil
       end
@@ -642,44 +641,47 @@ module Rack
 
     ## === The Status
     def check_status(status)
-      ## This is an HTTP status. When parsed as integer (+to_i+), it must be
-      ## greater than or equal to 100.
-      assert("Status must be >=100 seen as integer") { status.to_i >= 100 }
+      ## This is an HTTP status. It must be an Integer greater than or equal to
+      ## 100.
+      unless status.is_a?(Integer) && status >= 100
+        raise LintError, "Status must be an Integer >=100"
+      end
     end
 
     ## === The Headers
     def check_headers(header)
       ## The header must respond to +each+, and yield values of key and value.
-      assert("headers object should respond to #each, but doesn't (got #{header.class} as headers)") {
-         header.respond_to? :each
-      }
+      unless header.respond_to? :each
+        raise LintError, "headers object should respond to #each, but doesn't (got #{header.class} as headers)"
+      end
 
       header.each { |key, value|
         ## The header keys must be Strings.
-        assert("header key must be a string, was #{key.class}") {
-          key.kind_of? String
-        }
+        unless key.kind_of? String
+          raise LintError, "header key must be a string, was #{key.class}"
+        end
 
         ## Special headers starting "rack." are for communicating with the
         ## server, and must not be sent back to the client.
         next if key =~ /^rack\..+$/
 
         ## The header must not contain a +Status+ key.
-        assert("header must not contain Status") { key.downcase != "status" }
+        raise LintError, "header must not contain Status" if key.downcase == "status"
         ## The header must conform to RFC7230 token specification, i.e. cannot
         ## contain non-printable ASCII, DQUOTE or "(),/:;<=>?@[\]{}".
-        assert("invalid header name: #{key}") { key !~ /[\(\),\/:;<=>\?@\[\\\]{}[:cntrl:]]/ }
+        raise LintError, "invalid header name: #{key}" if key =~ /[\(\),\/:;<=>\?@\[\\\]{}[:cntrl:]]/
 
         ## The values of the header must be Strings,
-        assert("a header value must be a String, but the value of " +
-          "'#{key}' is a #{value.class}") { value.kind_of? String }
+        unless value.kind_of? String
+          raise LintError, "a header value must be a String, but the value of '#{key}' is a #{value.class}"
+        end
         ## consisting of lines (for multiple header values, e.g. multiple
         ## <tt>Set-Cookie</tt> values) separated by "\\n".
         value.split("\n").each { |item|
           ## The lines must not contain characters below 037.
-          assert("invalid header value #{key}: #{item.inspect}") {
-            item !~ /[\000-\037]/
-          }
+          if item =~ /[\000-\037]/
+            raise LintError, "invalid header value #{key}: #{item.inspect}"
+          end
         }
       }
     end
@@ -690,9 +692,9 @@ module Rack
         ## There must not be a <tt>Content-Type</tt>, when the +Status+ is 1xx,
         ## 204 or 304.
         if key.downcase == "content-type"
-          assert("Content-Type header found in #{status} response, not allowed") {
-            not Rack::Utils::STATUS_WITH_NO_ENTITY_BODY.key? status.to_i
-          }
+          if Rack::Utils::STATUS_WITH_NO_ENTITY_BODY.key? status.to_i
+            raise LintError, "Content-Type header found in #{status} response, not allowed"
+          end
           return
         end
       }
@@ -704,9 +706,9 @@ module Rack
         if key.downcase == 'content-length'
           ## There must not be a <tt>Content-Length</tt> header when the
           ## +Status+ is 1xx, 204 or 304.
-          assert("Content-Length header found in #{status} response, not allowed") {
-            not Rack::Utils::STATUS_WITH_NO_ENTITY_BODY.key? status.to_i
-          }
+          if Rack::Utils::STATUS_WITH_NO_ENTITY_BODY.key? status.to_i
+            raise LintError, "Content-Length header found in #{status} response, not allowed"
+          end
           @content_length = value
         end
       }
@@ -714,13 +716,13 @@ module Rack
 
     def verify_content_length(bytes)
       if @head_request
-        assert("Response body was given for HEAD request, but should be empty") {
-          bytes == 0
-        }
+        unless bytes == 0
+          raise LintError, "Response body was given for HEAD request, but should be empty"
+        end
       elsif @content_length
-        assert("Content-Length header was #{@content_length}, but should be #{bytes}") {
-          @content_length == bytes.to_s
-        }
+        unless @content_length == bytes.to_s
+          raise LintError, "Content-Length header was #{@content_length}, but should be #{bytes}"
+        end
       end
     end
 
@@ -730,15 +732,15 @@ module Rack
       bytes = 0
 
       ## The Body must respond to +each+
-      assert("Response body must respond to each") do
-        @body.respond_to?(:each)
+      unless @body.respond_to?(:each)
+        raise LintError, "Response body must respond to each"
       end
 
       @body.each { |part|
         ## and must only yield String values.
-        assert("Body yielded non-string value #{part.inspect}") {
-          part.kind_of? String
-        }
+        unless part.kind_of? String
+          raise LintError, "Body yielded non-string value #{part.inspect}"
+        end
         bytes += part.bytesize
         yield part
       }
@@ -751,7 +753,7 @@ module Rack
       ## If the Body responds to +close+, it will be called after iteration. If
       ## the body is replaced by a middleware after action, the original body
       ## must be closed first, if it responds to close.
-      # XXX howto: assert("Body has not been closed") { @closed }
+      # XXX howto: raise LintError, "Body has not been closed" unless @closed
 
 
       ##
@@ -762,9 +764,9 @@ module Rack
       ## transport the response.
 
       if @body.respond_to?(:to_path)
-        assert("The file identified by body.to_path does not exist") {
-          ::File.exist? @body.to_path
-        }
+        unless ::File.exist? @body.to_path
+          raise LintError, "The file identified by body.to_path does not exist"
+        end
       end
 
       ##

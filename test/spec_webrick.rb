@@ -2,7 +2,7 @@
 
 require_relative 'helper'
 require 'thread'
-require_relative 'testrequest'
+require_relative 'test_request'
 
 Thread.abort_on_exception = true
 
@@ -10,7 +10,7 @@ describe Rack::Handler::WEBrick do
   include TestRequest::Helpers
 
   before do
-  @server = WEBrick::HTTPServer.new(Host: @host = '127.0.0.1',
+  @server = WEBrick::HTTPServer.new(Host: @host = 'localhost',
                                     Port: @port = 9202,
                                     Logger: WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
                                     AccessLog: [])
@@ -42,10 +42,9 @@ describe Rack::Handler::WEBrick do
     GET("/test")
     status.must_equal 200
     response["SERVER_SOFTWARE"].must_match(/WEBrick/)
-    response["HTTP_VERSION"].must_equal "HTTP/1.1"
     response["SERVER_PROTOCOL"].must_equal "HTTP/1.1"
     response["SERVER_PORT"].must_equal "9202"
-    response["SERVER_NAME"].must_equal "127.0.0.1"
+    response["SERVER_NAME"].must_equal "localhost"
   end
 
   it "have rack headers" do
@@ -124,7 +123,7 @@ describe Rack::Handler::WEBrick do
 
     t = Thread.new do
       Rack::Handler::WEBrick.run(lambda {},
-                                   Host: '127.0.0.1',
+                                   Host: 'localhost',
                                    Port: 9210,
                                    Logger: WEBrick::Log.new(nil, WEBrick::BasicLog::WARN),
                                    AccessLog: []) { |server|

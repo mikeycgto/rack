@@ -1,5 +1,8 @@
+require:
+  - rubocop-packaging
+
 AllCops:
-  TargetRubyVersion: 2.3
+  TargetRubyVersion: 2.4
   DisabledByDefault: true
   Exclude:
     - '**/vendor/**/*'
@@ -12,6 +15,9 @@ Style/FrozenStringLiteralComment:
 
 # Use Ruby >= 1.9 syntax for hashes. Prefer { a: :b } over { :a => :b }.
 Style/HashSyntax:
+  Enabled: true
+
+Style/MethodDefParentheses:
   Enabled: true
 
 Layout/EmptyLineAfterMagicComment:
@@ -47,5 +53,11 @@ Layout/SpaceBeforeFirstArg:
 Layout/SpaceInsideHashLiteralBraces:
   Enabled: true
 
+Layout/IndentationStyle:
+  Enabled: true
+
 Layout/TrailingWhitespace:
+  Enabled: true
+
+Lint/DeprecatedOpenSSLConstant:
   Enabled: true

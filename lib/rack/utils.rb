@@ -27,7 +27,7 @@ module Rack
     end
     # The default number of bytes to allow parameter keys to take up.
     # This helps prevent a rogue client from flooding a Request.
-    self.default_query_parser = QueryParser.make_default(65536, 100)
+    self.default_query_parser = QueryParser.make_default(65536, 32)
 
     module_function
 
@@ -152,7 +152,7 @@ module Rack
       end.compact.sort_by do |match, quality|
         (match.split('/', 2).count('*') * -10) + quality
       end.last
-      matches && matches.first
+      matches&.first
     end
 
     ESCAPE_HTML = {
@@ -174,17 +174,23 @@ module Rack
     def select_best_encoding(available_encodings, accept_encoding)
       # http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html
 
-      expanded_accept_encoding =
-        accept_encoding.each_with_object([]) do |(m, q), list|
-          if m == "*"
-            (available_encodings - accept_encoding.map(&:first))
-              .each { |m2| list << [m2, q] }
-          else
-            list << [m, q]
-          end
-        end
+      expanded_accept_encoding = []
 
-      encoding_candidates = expanded_accept_encoding.sort_by { |_, q| -q }.map!(&:first)
+      accept_encoding.each do |m, q|
+        preference = available_encodings.index(m) || available_encodings.size
+
+        if m == "*"
+          (available_encodings - accept_encoding.map(&:first)).each do |m2|
+            expanded_accept_encoding << [m2, q, preference]
+          end
+        else
+          expanded_accept_encoding << [m, q, preference]
+        end
+      end
+
+      encoding_candidates = expanded_accept_encoding
+        .sort_by { |_, q, p| [-q, p] }
+        .map!(&:first)
 
       unless encoding_candidates.include?("identity")
         encoding_candidates.push("identity")
@@ -206,8 +212,12 @@ module Rack
       # The syntax for cookie headers only supports semicolons
       # User Agent -> Server ==
       # Cookie: SID=31d4d96e407aad42; lang=en-US
-      cookies = parse_query(header, ';') { |s| unescape(s) rescue s }
-      cookies.each_with_object({}) { |(k, v), hash| hash[k] = Array === v ? v.first : v }
+      return {} unless header
+      header.split(/[;] */n).each_with_object({}) do |cookie, cookies|
+        next if cookie.empty?
+        key, value = cookie.split('=', 2)
+        cookies[key] = (unescape(value) rescue value) unless cookies.key?(key)
+      end
     end
 
     def add_cookie_to_header(header, key, value)
@@ -364,14 +374,22 @@ module Rack
     # that have already been processed by HMAC. This should not be used
     # on variable length plaintext strings because it could leak length info
     # via timing attacks.
-    def secure_compare(a, b)
-      return false unless a.bytesize == b.bytesize
+    if defined?(OpenSSL.fixed_length_secure_compare)
+      def secure_compare(a, b)
+        return false unless a.bytesize == b.bytesize
 
-      l = a.unpack("C*")
+        OpenSSL.fixed_length_secure_compare(a, b)
+      end
+    else
+      def secure_compare(a, b)
+        return false unless a.bytesize == b.bytesize
 
-      r, i = 0, -1
-      b.each_byte { |v| r |= v ^ l[i += 1] }
-      r == 0
+        l = a.unpack("C*")
+
+        r, i = 0, -1
+        b.each_byte { |v| r |= v ^ l[i += 1] }
+        r == 0
+      end
     end
 
     # Context allows the use of a compatible middleware at different points
@@ -405,6 +423,14 @@ module Rack
     #
     # @api private
     class HeaderHash < Hash # :nodoc:
+      def self.[](headers)
+        if headers.is_a?(HeaderHash) && !headers.frozen?
+          return headers
+        else
+          return self.new(headers)
+        end
+      end
+
       def initialize(hash = {})
         super()
         @names = {}
@@ -459,6 +485,10 @@ module Rack
       alias_method :has_key?, :include?
       alias_method :member?, :include?
       alias_method :key?, :include?
+
+      def fetch(k, *args)
+        super(@names[k.downcase] || k, *args)
+      end
 
       def merge!(other)
         other.each { |k, v| self[k] = v }

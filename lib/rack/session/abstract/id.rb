@@ -209,8 +209,8 @@ module Rack
       # All parameters are optional.
       # * :key determines the name of the cookie, by default it is
       #   'rack.session'
-      # * :path, :domain, :expire_after, :secure, and :httponly set the related
-      #   cookie options as by Rack::Response#set_cookie
+      # * :path, :domain, :expire_after, :secure, :httponly, and :same_site set
+      #   the related cookie options as by Rack::Response#set_cookie
       # * :skip will not a set a cookie in the response nor update the session state
       # * :defer will not set a cookie in the response but still update the session
       #   state if it is used with a backend
@@ -252,6 +252,7 @@ module Rack
           @default_options = self.class::DEFAULT_OPTIONS.merge(options)
           @key = @default_options.delete(:key)
           @cookie_only = @default_options.delete(:cookie_only)
+          @same_site = @default_options.delete(:same_site)
           initialize_sid
         end
 
@@ -393,6 +394,12 @@ module Rack
             cookie[:value] = cookie_value(data)
             cookie[:expires] = Time.now + options[:expire_after] if options[:expire_after]
             cookie[:expires] = Time.now + options[:max_age] if options[:max_age]
+
+            if @same_site.respond_to? :call
+              cookie[:same_site] = @same_site.call(req, res)
+            else
+              cookie[:same_site] = @same_site
+            end
             set_cookie(req, res, cookie.merge!(options))
           end
         end
@@ -448,7 +455,12 @@ module Rack
           def [](key)
             if key == "session_id"
               load_for_read!
-              id.public_id if id
+              case id
+              when SessionId
+                id.public_id
+              else
+                id
+              end
             else
               super
             end

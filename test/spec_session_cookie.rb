@@ -209,6 +209,23 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
   end
 
+  it "passes through same_site option to session cookie" do
+    response = response_for(app: [incrementor, same_site: :none])
+    response["Set-Cookie"].must_include "SameSite=None"
+  end
+
+  it "allows using a lambda to specify same_site option, because some browsers require different settings" do
+    # Details of why this might need to be set dynamically:
+    # https://www.chromium.org/updates/same-site/incompatible-clients
+    # https://gist.github.com/bnorton/7dee72023787f367c48b3f5c2d71540f
+
+    response = response_for(app: [incrementor, same_site: lambda { |req, res| :none }])
+    response["Set-Cookie"].must_include "SameSite=None"
+
+    response = response_for(app: [incrementor, same_site: lambda { |req, res| :lax }])
+    response["Set-Cookie"].must_include "SameSite=Lax"
+  end
+
   it "loads from a cookie" do
     response = response_for(app: incrementor)
 
@@ -385,11 +402,11 @@ describe Rack::Session::Cookie do
     response.body.must_equal '{"counter"=>1}'
   end
 
-  it "supports custom digest class for legacy hmac cookie" do
-    legacy_hmac    = OpenSSL::Digest::SHA256
+  it "supports custom digest instance for legacy hmac cookie" do
+    legacy_hmac    = 'SHA256'
     legacy_session = Rack::Session::Cookie::Base64::Marshal.new.encode({ 'counter' => 1, 'session_id' => 'abcdef' })
     legacy_secret  = 'test legacy secret'
-    legacy_digest  = OpenSSL::HMAC.hexdigest(legacy_hmac.new, legacy_secret, legacy_session)
+    legacy_digest  = OpenSSL::HMAC.hexdigest(legacy_hmac, legacy_secret, legacy_session)
     legacy_cookie = "rack.session=#{legacy_session}--#{legacy_digest}; path=/; HttpOnly"
 
     app = [incrementor, {

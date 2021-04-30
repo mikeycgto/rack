@@ -25,7 +25,6 @@ module Rack
         )
 
         env[QUERY_STRING] ||= ""
-        env[HTTP_VERSION] ||= env[SERVER_PROTOCOL]
         env[REQUEST_PATH] ||= "/"
 
         status, headers, body = app.call(env)
@@ -55,5 +54,7 @@ module Rack
         }
       end
     end
+
+    register 'cgi', 'Rack::Handler::CGI'
   end
 end
