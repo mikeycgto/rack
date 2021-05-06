@@ -76,12 +76,12 @@ module Rack
 
       # The version is reserved for future
       _version = data.slice!(0, 1)
-      cipher_secret = data.slice!(0, 32)
+      message_secret = data.slice!(0, 32)
       cipher_iv = data.slice!(0, 16)
 
       cipher = new_cipher
       cipher.decrypt
-      cipher.key = cipher_secret
+      cipher.key = cipher_secret_from_message_secret(message_secret)
       cipher.iv = cipher_iv
       data = cipher.update(data) << cipher.final
 
@@ -105,7 +105,7 @@ module Rack
 
       data = String.new
       data << version
-      data << cipher_secret
+      data << message_secret
       data << cipher_iv
       data << encrypted_data
       data << compute_signature(data)
@@ -121,9 +121,12 @@ module Rack
 
     def new_message_and_cipher_secret
       message_secret = SecureRandom.random_bytes(32)
-      cipher_secret = OpenSSL::HMAC.digest(OpenSSL::Digest::SHA256.new, @cipher_secret, message_secret)
 
-      [message_secret, cipher_secret]
+      [message_secret, cipher_secret_from_message_secret(message_secret)]
+    end
+
+    def cipher_secret_from_message_secret(message_secret)
+      OpenSSL::HMAC.digest(OpenSSL::Digest::SHA256.new, @cipher_secret, message_secret)
     end
 
     def serializer
