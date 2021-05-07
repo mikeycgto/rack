@@ -116,4 +116,32 @@ describe Rack::Encryptor do
 
     (encrypted_payload.bytesize % 24).must_equal 0
   end
+
+  # This test checks the one-time message key IS NOT used as the cipher key.
+  # Doing so would remove the confidentiality assurances.
+  it 'uses a secret cipher key for encryption and decryption' do
+    cipher = OpenSSL::Cipher.new('aes-256-ctr')
+    encryptor = Rack::Encryptor.new(@secret)
+
+    message = encryptor.encrypt(foo: 'bar')
+    raw_message = Base64.urlsafe_decode64(message)
+
+    ver = raw_message.slice!(0, 1)
+    key = raw_message.slice!(0, 32)
+    iv = raw_message.slice!(0, 16)
+
+    cipher.decrypt
+    cipher.key = key
+    cipher.iv = iv
+
+    data = cipher.update(raw_message) << cipher.final
+
+    # "data" should now be random bytes because we tried to decrypt a message
+    # with the wrong key
+
+    padding_bytes, = data.unpack('v') # likely a large number
+    serialized_data = data.slice(2 + padding_bytes, data.bytesize) # likely nil
+
+    lambda { Marshal.load serialized_data }.must_raise TypeError
+  end
 end
