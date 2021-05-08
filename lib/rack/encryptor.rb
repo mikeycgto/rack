@@ -81,7 +81,9 @@ module Rack
 
       cipher = new_cipher
       cipher.decrypt
-      cipher.key = cipher_secret_from_message_secret(message_secret)
+
+      set_cipher_key(cipher, cipher_secret_from_message_secret(message_secret))
+
       cipher.iv = cipher_iv
       data = cipher.update(data) << cipher.final
 
@@ -98,7 +100,9 @@ module Rack
 
       cipher = new_cipher
       cipher.encrypt
-      cipher.key = cipher_secret
+
+      set_cipher_key(cipher, cipher_secret)
+
       cipher_iv = cipher.random_iv
 
       encrypted_data = cipher.update(serialized_payload) << cipher.final
@@ -127,6 +131,10 @@ module Rack
 
     def cipher_secret_from_message_secret(message_secret)
       OpenSSL::HMAC.digest(OpenSSL::Digest::SHA256.new, @cipher_secret, message_secret)
+    end
+
+    def set_cipher_key(cipher, key)
+      cipher.key = key
     end
 
     def serializer

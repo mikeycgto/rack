@@ -118,7 +118,8 @@ describe Rack::Encryptor do
   end
 
   # This test checks the one-time message key IS NOT used as the cipher key.
-  # Doing so would remove the confidentiality assurances.
+  # Doing so would remove the confidentiality assurances as the key is
+  # essentially included in plaintext then.
   it 'uses a secret cipher key for encryption and decryption' do
     cipher = OpenSSL::Cipher.new('aes-256-ctr')
     encryptor = Rack::Encryptor.new(@secret)
@@ -143,5 +144,23 @@ describe Rack::Encryptor do
     serialized_data = data.slice(2 + padding_bytes, data.bytesize) # likely nil
 
     lambda { Marshal.load serialized_data }.must_raise TypeError
+  end
+
+  it 'it calls set_cipher_key with the correct key' do
+    encryptor = Rack::Encryptor.new(@secret, purpose: 'testing', pad_size: 24)
+    message = encryptor.encrypt(foo: 'bar')
+
+    message_key = Base64.urlsafe_decode64(message).slice(1, 32)
+
+    callable = proc do |cipher, key|
+      key.wont_equal @secret
+      key.wont_equal message_key
+
+      cipher.key = key
+    end
+
+    encryptor.stub :set_cipher_key, callable do
+      encryptor.decrypt message
+    end
   end
 end
