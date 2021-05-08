@@ -44,13 +44,13 @@ module Rack
     #
     # Example:
     #
-    #     use Rack::Session::Cookie, {
-    #       key: 'rack.session',
-    #       domain: 'foo.com',
-    #       path: '/',
-    #       expire_after: 2592000,
-    #       secrets: 'a random binary string, 64 bytes in size',
-    #     }
+    #   use Rack::Session::Cookie, {
+    #     key: 'rack.session',
+    #     domain: 'foo.com',
+    #     path: '/',
+    #     expire_after: 2592000,
+    #     secrets: 'a randomly generated, raw binary string 64 bytes in size',
+    #   }
     #
     # Example using legacy HMAC options:
     #
@@ -148,8 +148,6 @@ module Rack
       attr_reader :coder, :encryptors
 
       def initialize(app, options = {})
-        # TODO handle decoding the secrets... are they base64? hex? raw binary
-        # strings? it needs to be decoded and should be >= 64 bytes
         secrets = [*options[:secrets]]
 
         encryptor_opts = {
